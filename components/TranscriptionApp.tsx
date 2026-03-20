@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import pkg from "../package.json";
 
 const LS_GROQ_KEY   = "tt_groq_key";
 const LS_GEMINI_KEY = "tt_gemini_key";
@@ -54,6 +55,7 @@ export default function TranscriptionApp() {
   const [provider, setProvider]           = useState<"gemini" | "groq">("groq");
   const [targetLanguage, setTargetLanguage] = useState<"english" | "hindi">("english");
   const [globalContext, setGlobalContext] = useState("");
+  const [onlineCount, setOnlineCount]     = useState(1);
   const [tokenStats, setTokenStats]       = useState<TokenStats | null>(null);
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
   const [groqKey, setGroqKey]             = useState("");
@@ -62,6 +64,7 @@ export default function TranscriptionApp() {
   const [keysVisible, setKeysVisible]     = useState(false);
   const groqKeyRef                        = useRef("");
   const geminiKeyRef                      = useRef("");
+  const sessionIdRef                      = useRef<string>("");
 
   const batchSecRef       = useRef(batchSec);
   const providerRef       = useRef(provider);
@@ -78,6 +81,31 @@ export default function TranscriptionApp() {
   const sourcePanelRef    = useRef<HTMLDivElement>(null);
   const translatedPanelRef = useRef<HTMLDivElement>(null);
   const logPanelRef       = useRef<HTMLDivElement>(null);
+
+  // ── Presence Heartbeat ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = Math.random().toString(36).substring(2, 15);
+    }
+
+    const sendHeartbeat = async () => {
+      try {
+        const res = await fetch("/api/presence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: sessionIdRef.current }),
+        });
+        const data = await res.json();
+        if (data.onlineCount) setOnlineCount(data.onlineCount);
+      } catch {
+        // ignore presence errors
+      }
+    };
+
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 30000); // every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   // Sync refs
   useEffect(() => { batchSecRef.current = batchSec; }, [batchSec]);
@@ -435,6 +463,20 @@ export default function TranscriptionApp() {
           </div>
         </div>
       )}
+
+      {/* Footer */}
+      <footer className="px-6 py-2 border-t border-slate-700 bg-slate-800/20 text-[10px] text-slate-500 flex justify-between items-center shrink-0">
+        <div className="flex items-center gap-4">
+          <span>Point mic toward the speaker. Audio processed every {batchSec}s.</span>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-slate-400">{onlineCount} user{onlineCount !== 1 ? "s" : ""} online</span>
+          </div>
+        </div>
+        <div className="font-mono opacity-50">
+          v{pkg.version}
+        </div>
+      </footer>
     </div>
   );
 }

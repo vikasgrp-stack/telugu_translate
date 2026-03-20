@@ -101,10 +101,10 @@ async function transcribeWithGroq(
     file,
     model: "whisper-large-v3",
     response_format: "verbose_json",
-  });
+  }) as any;
 
   const sourceText = transcription.text.trim();
-  const detectedLanguageCode = transcription.language;
+  const detectedLanguageCode = transcription.language || "unknown";
   const detectedLanguage = detectedLanguageCode.charAt(0).toUpperCase() + detectedLanguageCode.slice(1);
   
   if (!sourceText || sourceText.length < 5) {

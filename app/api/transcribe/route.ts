@@ -15,7 +15,7 @@ export type TokenUsage = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
-  contextWindow: number; // model's max context window
+  contextWindow: number;
 };
 
 type TranscribeResult = {
@@ -46,27 +46,23 @@ async function transcribeWithGemini(
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `This is audio from a speaker. It could be in any language (often Telugu, English, or Hindi).
+    `This is audio from a speech. It may contain spiritual discourse or philosophical talk.
 
-Please:
-1. Detect the source language of the speech.
-2. Transcribe the speech exactly as spoken in the source language.
-3. Translate the speech into ${targetLang}. 
-   - Note: If the detected source language is English and the requested target is English, translate it to Hindi instead.
+STRICT INSTRUCTIONS:
+1. STICK ONLY TO THE SPEECH IN THE AUDIO. Do not add any information, names, or concepts not mentioned.
+2. NO HALLUCINATIONS. If the audio contains silence, background noise, or is unclear, do not invent text. 
+3. DO NOT use flowery, poetic, or religious "filler" language unless the speaker specifically said those words.
+4. If the source is English and target is English, translate to Hindi. Otherwise translate to ${targetLang}.
+5. Transcribe exactly what is heard in the source language first.
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcribed text>","translatedText":"<translation>","detectedLanguage":"<detected language name in english>"}
-
-If silent or no speech:
-{"sourceText":"","translatedText":"","detectedLanguage":""}
+{"sourceText":"<exact transcription>","translatedText":"<strict translation>","detectedLanguage":"<language>"}
 
 ${contextText}`,
   ]);
 
   const raw = result.response.text().trim()
     .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
-
-  serverLog(`Gemini response: ${raw.slice(0, 200)}`);
 
   const meta = result.response.usageMetadata;
   const usage: TokenUsage = {
@@ -105,7 +101,6 @@ async function transcribeWithGroq(
 
   serverLog(`Groq: transcribing with whisper-large-v3. Target: ${targetLang}`);
 
-  // Step 1: Transcribe with Whisper (Auto-detect language)
   const transcription = await groq.audio.transcriptions.create({
     file,
     model: "whisper-large-v3",
@@ -113,51 +108,49 @@ async function transcribeWithGroq(
   });
 
   const sourceText = transcription.text.trim();
-  const detectedLanguageCode = transcription.language; // e.g., "telugu", "english"
+  const detectedLanguageCode = transcription.language;
   const detectedLanguage = detectedLanguageCode.charAt(0).toUpperCase() + detectedLanguageCode.slice(1);
   
-  serverLog(`Groq Whisper result: [${detectedLanguage}] "${sourceText.slice(0, 100)}"`);
-
-  if (!sourceText) {
+  if (!sourceText || sourceText.length < 5) {
     return { sourceText: "", translatedText: "", detectedLanguage: "", usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, contextWindow: GROQ_CONTEXT_WINDOW } };
   }
 
-  // Determine actual target language based on rule: English -> English becomes English -> Hindi
   let actualTarget = targetLang;
   if (detectedLanguageCode.toLowerCase() === "english" && targetLang === "english") {
     actualTarget = "hindi";
   }
 
-  // Step 2: Translate with LLaMA
-  serverLog(`Groq: translating to ${actualTarget} with llama-3.3-70b-versatile`);
+  serverLog(`Groq: translating to ${actualTarget}`);
 
-  const contextText = context?.length ? `Context (previous segments): ${context.join(" ")}\n\n` : "";
+  const contextText = context?.length ? `Context: ${context.join(" ")}\n\n` : "";
 
   const chat = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: [
       {
         role: "system",
-        content: `You are an expert translator. Detect the tone and context of the input text and translate it into fluent, natural ${actualTarget}.
-Guidelines:
-- If the text is spiritual discourse, preserve Sanskrit scriptural terms.
-- Output ONLY the translated text — no explanations, no extra text.`,
+        content: `You are a strict, literal translator. 
+RULES:
+1. Translate the input text ONLY. 
+2. DO NOT add any background information, religious commentary, or poetic interpretations.
+3. If the input contains transcription errors (gibberish, random Bengali/Chinese characters, or nonsensical syllables), IGNORE THEM. Do not try to translate nonsense.
+4. Keep the tone identical to the source.
+5. Output ONLY the translated text.`,
       },
       {
         role: "user",
         content: `${contextText}Translate this ${detectedLanguage} text to ${actualTarget}:\n${sourceText}`,
       },
     ],
-    temperature: 0.2,
+    temperature: 0.1,
     max_tokens: 1024,
   });
 
   const translatedText = chat.choices[0]?.message?.content?.trim() ?? "";
-  const u = chat.usage;
-  const usage: TokenUsage = {
-    promptTokens:     u?.prompt_tokens     ?? 0,
-    completionTokens: u?.completion_tokens ?? 0,
-    totalTokens:      u?.total_tokens      ?? 0,
+  const usage = {
+    promptTokens:     chat.usage?.prompt_tokens     ?? 0,
+    completionTokens: chat.usage?.completion_tokens ?? 0,
+    totalTokens:      chat.usage?.total_tokens      ?? 0,
     contextWindow:    GROQ_CONTEXT_WINDOW,
   };
 
@@ -168,9 +161,7 @@ Guidelines:
 export async function POST(req: NextRequest) {
   const { audio, mimeType, provider, groqKey, geminiKey, context, targetLanguage } = await req.json();
 
-  if (!audio) {
-    return new Response(JSON.stringify({ error: "No audio data" }), { status: 400 });
-  }
+  if (!audio) return new Response(JSON.stringify({ error: "No audio" }), { status: 400 });
 
   const selectedProvider = provider === "groq" ? "groq" : "gemini";
   const target = targetLanguage === "hindi" ? "hindi" : "english";
@@ -180,17 +171,10 @@ export async function POST(req: NextRequest) {
       ? await transcribeWithGroq(audio, mimeType, groqKey, context, target)
       : await transcribeWithGemini(audio, mimeType, geminiKey, context, target);
 
-    return new Response(JSON.stringify(result), {
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const is429 = msg.includes("429");
-    serverLog(`${selectedProvider} error: ${msg.slice(0, 300)}`);
-
-    return new Response(
-      JSON.stringify({ error: is429 ? "Rate limit — wait a minute and try again" : msg }),
-      { status: is429 ? 429 : 500 }
-    );
+    serverLog(`${selectedProvider} error: ${msg}`);
+    return new Response(JSON.stringify({ error: msg }), { status: 500 });
   }
 }

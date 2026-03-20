@@ -34,31 +34,32 @@ async function transcribeWithGemini(
   mimeType: string,
   apiKey?: string,
   context?: string[],
-  targetLang: "english" | "hindi" = "english"
+  targetLang: "english" | "hindi" = "english",
+  globalContext?: string
 ): Promise<TranscribeResult> {
   const key = apiKey?.trim() || process.env.GEMINI_API_KEY!;
   if (!key) throw new Error("No Gemini API key configured");
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
-  const contextText = context?.length ? `PREVIOUS CONTEXT (The speaker was just talking about): ${context.join(" ")}\n\n` : "";
+  const gContext = globalContext ? `OVERALL SPEECH CONTEXT: ${globalContext}\n` : "";
+  const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
     `You are a Contextual Interpreter and soulful translator. 
-Your goal is to capture the ESSENCE and MEANING of the speech, not just a word-for-word map.
+Capture the ESSENCE and MEANING of the speech.
 
 STRICT INSTRUCTIONS:
-1. Detect the language and transcribe it exactly.
+${gContext}${recentContext}
+1. Detect language and transcribe exactly.
 2. Translate to ${targetLang}. (If source is English and target is English, use Hindi).
-3. SOULFUL TRANSLATION: Prioritize the speaker's intent, philosophical depth, and natural flow. The translation should read like a wise person explaining the message.
-4. NO HALLUCINATIONS: Do not invent facts, but do use appropriate vocabulary to convey the "heart" of the message.
-5. CONTINUITY: If context is provided, ensure this segment flows naturally from the previous ones.
+3. SOULFUL TRANSLATION: Prioritize the speaker's intent and philosophical depth. Use natural flow.
+4. NO HALLUCINATIONS: Stick to the speech, but use the provided context to understand technical terms or names correctly.
+5. CONTINUITY: Ensure this segment flows naturally from the recent history.
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<essence-based translation>","detectedLanguage":"<language>"}
-
-${contextText}`,
+{"sourceText":"<transcription>","translatedText":"<essence-based translation>","detectedLanguage":"<language>"}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -85,7 +86,8 @@ async function transcribeWithGroq(
   mimeType: string,
   apiKey?: string,
   context?: string[],
-  targetLang: "english" | "hindi" = "english"
+  targetLang: "english" | "hindi" = "english",
+  globalContext?: string
 ): Promise<TranscribeResult> {
   const key = apiKey?.trim() || process.env.GROQ_API_KEY;
   if (!key) throw new Error("No Groq API key configured");
@@ -114,27 +116,27 @@ async function transcribeWithGroq(
     actualTarget = "hindi";
   }
 
-  const contextText = context?.length ? `PREVIOUS CONTEXT: ${context.join(" ")}\n\n` : "";
+  const gContext = globalContext ? `OVERALL SPEECH CONTEXT: ${globalContext}\n` : "";
+  const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const chat = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: [
       {
         role: "system",
-        content: `You are a Contextual Interpreter. Your mission is to translate with "soul" and "essence."
-1. Capture the MEANING and DEPTH of the message. 
-2. Do not do a literal word-for-word translation if it loses the spirit of the talk.
-3. Use natural, fluent, and profound language in ${actualTarget}.
-4. Maintain strict continuity with the provided context.
-5. If the input is noise or gibberish, return an empty string.
-6. Output ONLY the translated text.`,
+        content: `You are a Contextual Interpreter.
+${gContext}${recentContext}
+1. Capture the MEANING and SOUL of the message. 
+2. Use natural, profound language in ${actualTarget}.
+3. Maintain strict continuity with the provided context.
+4. Output ONLY the translated text.`,
       },
       {
         role: "user",
-        content: `${contextText}Capture the essence of this ${detectedLanguage} speech in ${actualTarget}:\n${sourceText}`,
+        content: `Capture the essence of this ${detectedLanguage} speech in ${actualTarget}:\n${sourceText}`,
       },
     ],
-    temperature: 0.3, // Slightly higher for more natural flow
+    temperature: 0.3,
     max_tokens: 1024,
   });
 
@@ -151,7 +153,7 @@ async function transcribeWithGroq(
 
 // ── Route handler ─────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const { audio, mimeType, provider, groqKey, geminiKey, context, targetLanguage } = await req.json();
+  const { audio, mimeType, provider, groqKey, geminiKey, context, targetLanguage, globalContext } = await req.json();
   if (!audio) return new Response(JSON.stringify({ error: "No audio" }), { status: 400 });
 
   const selectedProvider = provider === "groq" ? "groq" : "gemini";
@@ -159,8 +161,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = selectedProvider === "groq"
-      ? await transcribeWithGroq(audio, mimeType, groqKey, context, target)
-      : await transcribeWithGemini(audio, mimeType, geminiKey, context, target);
+      ? await transcribeWithGroq(audio, mimeType, groqKey, context, target, globalContext)
+      : await transcribeWithGemini(audio, mimeType, geminiKey, context, target, globalContext);
 
     return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
   } catch (err) {

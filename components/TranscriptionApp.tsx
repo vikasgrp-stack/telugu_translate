@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const LS_GROQ_KEY   = "tt_groq_key";
 const LS_GEMINI_KEY = "tt_gemini_key";
+const LS_CONTEXT    = "tt_global_context";
 
 type TranscriptChunk = {
   id: string;
@@ -52,6 +53,7 @@ export default function TranscriptionApp() {
   const [recording, setRecording]         = useState(false);
   const [provider, setProvider]           = useState<"gemini" | "groq">("groq");
   const [targetLanguage, setTargetLanguage] = useState<"english" | "hindi">("english");
+  const [globalContext, setGlobalContext] = useState("");
   const [tokenStats, setTokenStats]       = useState<TokenStats | null>(null);
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
   const [groqKey, setGroqKey]             = useState("");
@@ -61,10 +63,10 @@ export default function TranscriptionApp() {
   const groqKeyRef                        = useRef("");
   const geminiKeyRef                      = useRef("");
 
-  // Refs to avoid stale closures in MediaRecorder callbacks
   const batchSecRef       = useRef(batchSec);
   const providerRef       = useRef(provider);
   const targetLanguageRef = useRef(targetLanguage);
+  const globalContextRef  = useRef(globalContext);
   const isListeningRef    = useRef(false);
   const chunksRef         = useRef<TranscriptChunk[]>([]);
   
@@ -77,15 +79,23 @@ export default function TranscriptionApp() {
   const translatedPanelRef = useRef<HTMLDivElement>(null);
   const logPanelRef       = useRef<HTMLDivElement>(null);
 
-  // Sync refs with state
+  // Sync refs
   useEffect(() => { batchSecRef.current = batchSec; }, [batchSec]);
   useEffect(() => { providerRef.current = provider; }, [provider]);
   useEffect(() => { targetLanguageRef.current = targetLanguage; }, [targetLanguage]);
+  useEffect(() => { globalContextRef.current = globalContext; localStorage.setItem(LS_CONTEXT, globalContext); }, [globalContext]);
   useEffect(() => { chunksRef.current = chunks; }, [chunks]);
+
+  // Auto-scroll on new chunks
+  useEffect(() => {
+    scrollPanels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chunks]);
 
   useEffect(() => {
     setGroqKey(localStorage.getItem(LS_GROQ_KEY)   ?? "");
     setGeminiKey(localStorage.getItem(LS_GEMINI_KEY) ?? "");
+    setGlobalContext(localStorage.getItem(LS_CONTEXT) ?? "");
   }, []);
 
   useEffect(() => { groqKeyRef.current = groqKey;     localStorage.setItem(LS_GROQ_KEY,   groqKey);   }, [groqKey]);
@@ -125,18 +135,10 @@ export default function TranscriptionApp() {
 
   const processAudioBlob = useCallback(async (blob: Blob) => {
     addLog("audio", `Processing batch...`);
-
-    if (blob.size < 1000) {
-      addLog("warn", "Audio too quiet — skipping");
-      return;
-    }
+    if (blob.size < 1000) return;
 
     const chunkId = `${Date.now()}-${Math.random()}`;
-    setChunks(prev => {
-      const updated = [...prev, { id: chunkId, sourceText: "", translatedText: "", isTranslating: true }];
-      return updated.length > 200 ? updated.slice(-200) : updated;
-    });
-    scrollPanels();
+    setChunks(prev => [...prev, { id: chunkId, sourceText: "", translatedText: "", isTranslating: true }]);
 
     try {
       const arrayBuffer = await blob.arrayBuffer();
@@ -144,9 +146,7 @@ export default function TranscriptionApp() {
       let binary = "";
       for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
       const base64 = btoa(binary);
-      const mimeType = blob.type || "audio/webm";
 
-      // Use the REF to get the most recent chunks, avoiding stale closures
       const context = chunksRef.current
         .filter(c => !c.isTranslating && c.sourceText)
         .slice(-3)
@@ -157,11 +157,12 @@ export default function TranscriptionApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           audio: base64,
-          mimeType,
+          mimeType: blob.type || "audio/webm",
           provider: providerRef.current,
           groqKey:   groqKeyRef.current.trim()   || undefined,
           geminiKey: geminiKeyRef.current.trim() || undefined,
           context:   context.length > 0 ? context : undefined,
+          globalContext: globalContextRef.current.trim() || undefined,
           targetLanguage: targetLanguageRef.current,
         }),
       });
@@ -172,7 +173,7 @@ export default function TranscriptionApp() {
       if (data.usage) {
         const u = data.usage;
         const prev = tokenStatsRef.current;
-        const updated: TokenStats = {
+        tokenStatsRef.current = {
           sessionTotal:   (prev?.sessionTotal  ?? 0) + u.totalTokens,
           lastPrompt:     u.promptTokens,
           lastCompletion: u.completionTokens,
@@ -181,13 +182,7 @@ export default function TranscriptionApp() {
           audioSeconds:   (prev?.audioSeconds  ?? 0) + batchSecRef.current,
           sessionStartMs: prev?.sessionStartMs ?? Date.now(),
         };
-        tokenStatsRef.current = updated;
-        setTokenStats(updated);
-      }
-
-      if (!data.sourceText && !data.translatedText) {
-        setChunks(prev => prev.filter(c => c.id !== chunkId));
-        return;
+        setTokenStats(tokenStatsRef.current);
       }
 
       setChunks(prev => prev.map(c =>
@@ -195,17 +190,15 @@ export default function TranscriptionApp() {
           ? { ...c, sourceText: data.sourceText, translatedText: data.translatedText, detectedLanguage: data.detectedLanguage, isTranslating: false }
           : c
       ));
-      scrollPanels();
     } catch (err) {
       addLog("error", `API Error: ${err instanceof Error ? err.message : String(err)}`);
       setChunks(prev => prev.filter(c => c.id !== chunkId));
     }
-  }, [addLog, scrollPanels]);
+  }, [addLog]);
 
   const flushRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state !== "recording") return;
-    recorder.stop();
+    if (recorder?.state === "recording") recorder.stop();
   }, []);
 
   const scheduleBatch = useCallback(() => {
@@ -234,8 +227,7 @@ export default function TranscriptionApp() {
     mediaRecorderRef.current = recorder;
 
     recorder.ondataavailable = (e) => {
-      if (!e.data || e.data.size < 100) return;
-      processAudioBlob(new Blob([e.data], { type: mimeType || "audio/webm" }));
+      if (e.data.size > 100) processAudioBlob(new Blob([e.data], { type: mimeType || "audio/webm" }));
     };
 
     recorder.onstop = () => {
@@ -281,7 +273,7 @@ export default function TranscriptionApp() {
     setNextFlushIn(null);
 
     const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state === "recording") recorder.stop();
+    if (recorder?.state === "recording") recorder.stop();
     recorder?.stream?.getTracks().forEach(t => t.stop());
   }, []);
 
@@ -338,6 +330,17 @@ export default function TranscriptionApp() {
         </div>
       )}
 
+      {/* Global Context Section */}
+      <div className="px-6 py-4 border-b border-slate-700 bg-slate-800/30">
+        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-[0.2em] mb-2">Speech Context (Topic, Speaker, Keywords)</label>
+        <textarea
+          value={globalContext}
+          onChange={(e) => setGlobalContext(e.target.value)}
+          placeholder="e.g., Spiritual lecture on Bhagavad Gita Chapter 2, speaker is explaining the soul..."
+          className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500/50 transition-colors resize-none h-20"
+        />
+      </div>
+
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-6 py-3 border-b border-slate-700 shrink-0 bg-slate-800/50">
         <button onClick={isListening ? stopListening : startListening} className={`px-5 py-2 rounded-full font-medium text-sm transition-all shrink-0 ${isListening ? "bg-red-500 hover:bg-red-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white"}`}>
           {isListening ? "Stop Listening" : "Start Listening"}
@@ -392,7 +395,7 @@ export default function TranscriptionApp() {
           <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
             <span className="text-xs font-semibold tracking-widest text-slate-400 uppercase">{detectedLabel} — Heard</span>
           </div>
-          <div ref={sourcePanelRef} className="flex-1 overflow-y-auto p-4 space-y-2">
+          <div ref={sourcePanelRef} className="flex-1 overflow-y-auto p-4 space-y-2 scroll-smooth">
             {chunks.map(chunk => (
               <p key={chunk.id} className={`leading-relaxed ${chunk.isTranslating ? "text-slate-500 italic" : "text-slate-100"}`}>
                 {chunk.sourceText || (chunk.isTranslating ? "Transcribing…" : "")}
@@ -405,7 +408,7 @@ export default function TranscriptionApp() {
           <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
             <span className="text-xs font-semibold tracking-widest text-slate-400 uppercase">{targetLabel} — Translation</span>
           </div>
-          <div ref={translatedPanelRef} className="flex-1 overflow-y-auto p-4 space-y-2 text-emerald-50/90">
+          <div ref={translatedPanelRef} className="flex-1 overflow-y-auto p-4 space-y-2 text-emerald-50/90 scroll-smooth">
             {chunks.map(chunk => (
               <p key={chunk.id} className={`leading-relaxed ${chunk.isTranslating ? "text-slate-500 italic" : "text-slate-100"}`}>
                 {chunk.translatedText || (chunk.isTranslating ? "Translating…" : "")}

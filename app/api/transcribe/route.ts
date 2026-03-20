@@ -19,43 +19,48 @@ export type TokenUsage = {
 };
 
 type TranscribeResult = {
-  telugu: string;
-  english: string;
+  sourceText: string;
+  translatedText: string;
+  detectedLanguage: string;
   usage: TokenUsage;
 };
 
 // ── Gemini ────────────────────────────────────────────────────────────────
-// gemini-2.0-flash-lite context window: 1,048,576 tokens
 const GEMINI_CONTEXT_WINDOW = 1_048_576;
 
 async function transcribeWithGemini(
   audio: string,
   mimeType: string,
   apiKey?: string,
-  context?: string[]
+  context?: string[],
+  targetLang: "english" | "hindi" = "english"
 ): Promise<TranscribeResult> {
   const key = apiKey?.trim() || process.env.GEMINI_API_KEY!;
   if (!key) throw new Error("No Gemini API key configured");
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
-  serverLog("Gemini: calling gemini-2.0-flash-lite with audio");
+  serverLog(`Gemini: calling gemini-2.0-flash-lite with audio. Target: ${targetLang}`);
 
-  const contextText = context?.length ? `Previous Telugu segments for context:\n${context.join("\n")}\n\n` : "";
+  const contextText = context?.length ? `Previous segments for context:\n${context.join("\n")}\n\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `This is Telugu audio, likely containing spiritual discourse referencing Sanskrit scriptures such as the Bhagavatam (Srimad Bhagavatam), Bhagavad Gita, Upanishads, Vedas, Puranas, or related Hindu texts. The speaker may quote Sanskrit shlokas/verses directly, then explain them in Telugu.
+    `This is audio from a speaker. It could be in any language (often Telugu, English, or Hindi).
 
 Please:
-1. Transcribe the Telugu speech exactly as spoken, preserving Sanskrit words, shloka quotes, and names of deities, sages, or scriptural terms (e.g. Krishna, Vishnu, Brahma, dharma, moksha, bhakti, jnana, karma, atma, paramatma, maya, leela, samsara, etc.) as they are pronounced
-2. Translate the Telugu explanation to English, using standard English equivalents for well-known Sanskrit/scriptural terms where appropriate (e.g. "dharma", "moksha", "bhakti" can be kept as-is or briefly explained)
+1. Detect the source language of the speech.
+2. Transcribe the speech exactly as spoken in the source language.
+3. Translate the speech into ${targetLang}. 
+   - Note: If the detected source language is English and the requested target is English, translate it to Hindi instead.
 
-${contextText}Respond with ONLY a JSON object — no markdown, no code block:
-{"telugu":"<transcribed telugu>","english":"<english translation>"}
+Respond with ONLY a JSON object:
+{"sourceText":"<transcribed text>","translatedText":"<translation>","detectedLanguage":"<detected language name in english>"}
 
 If silent or no speech:
-{"telugu":"","english":""}`,
+{"sourceText":"","translatedText":"","detectedLanguage":""}
+
+${contextText}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -70,82 +75,84 @@ If silent or no speech:
     totalTokens:      meta?.totalTokenCount      ?? 0,
     contextWindow:    GEMINI_CONTEXT_WINDOW,
   };
-  serverLog(`Gemini tokens — prompt: ${usage.promptTokens}, completion: ${usage.completionTokens}, total: ${usage.totalTokens}`);
 
   try {
-    return { ...JSON.parse(raw), usage };
+    const parsed = JSON.parse(raw);
+    return { ...parsed, usage };
   } catch {
     serverLog(`Gemini JSON parse failed: ${raw}`);
-    return { telugu: "", english: raw, usage };
+    return { sourceText: "", translatedText: raw, detectedLanguage: "unknown", usage };
   }
 }
 
 // ── Groq ──────────────────────────────────────────────────────────────────
-// llama-3.3-70b-versatile context window: 128,000 tokens
 const GROQ_CONTEXT_WINDOW = 128_000;
 
 async function transcribeWithGroq(
   audio: string,
   mimeType: string,
   apiKey?: string,
-  context?: string[]
+  context?: string[],
+  targetLang: "english" | "hindi" = "english"
 ): Promise<TranscribeResult> {
   const key = apiKey?.trim() || process.env.GROQ_API_KEY;
   if (!key) throw new Error("No Groq API key configured");
   const groq = new Groq({ apiKey: key });
 
-  // Convert base64 → Buffer → File for Whisper
   const buffer = Buffer.from(audio, "base64");
   const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
   const file = new File([buffer], `audio.${ext}`, { type: mimeType });
 
-  serverLog(`Groq: transcribing with whisper-large-v3 — file size: ${(buffer.length / 1024).toFixed(1)} KB`);
+  serverLog(`Groq: transcribing with whisper-large-v3. Target: ${targetLang}`);
 
-  // Step 1: Transcribe Telugu audio with Whisper (no token usage returned)
+  // Step 1: Transcribe with Whisper (Auto-detect language)
   const transcription = await groq.audio.transcriptions.create({
     file,
     model: "whisper-large-v3",
-    language: "te",         // Telugu
-    response_format: "text",
+    response_format: "verbose_json",
   });
 
-  const teluguText = (transcription as unknown as string).trim();
-  serverLog(`Groq Whisper result: "${teluguText.slice(0, 150)}"`);
+  const sourceText = transcription.text.trim();
+  const detectedLanguageCode = transcription.language; // e.g., "telugu", "english"
+  const detectedLanguage = detectedLanguageCode.charAt(0).toUpperCase() + detectedLanguageCode.slice(1);
+  
+  serverLog(`Groq Whisper result: [${detectedLanguage}] "${sourceText.slice(0, 100)}"`);
 
-  if (!teluguText) {
-    return { telugu: "", english: "", usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, contextWindow: GROQ_CONTEXT_WINDOW } };
+  if (!sourceText) {
+    return { sourceText: "", translatedText: "", detectedLanguage: "", usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, contextWindow: GROQ_CONTEXT_WINDOW } };
   }
 
-  // Step 2: Translate Telugu → English with LLaMA
-  serverLog("Groq: translating with llama-3.3-70b-versatile");
+  // Determine actual target language based on rule: English -> English becomes English -> Hindi
+  let actualTarget = targetLang;
+  if (detectedLanguageCode.toLowerCase() === "english" && targetLang === "english") {
+    actualTarget = "hindi";
+  }
 
-  const contextText = context?.length ? `Context (previous Telugu): ${context.join(" ")}\n\n` : "";
+  // Step 2: Translate with LLaMA
+  serverLog(`Groq: translating to ${actualTarget} with llama-3.3-70b-versatile`);
+
+  const contextText = context?.length ? `Context (previous segments): ${context.join(" ")}\n\n` : "";
 
   const chat = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: [
       {
         role: "system",
-        content: `You are an expert Telugu-to-English translator specializing in Hindu spiritual discourse. The text you receive comes from talks or lectures that frequently reference Sanskrit scriptures — particularly the Srimad Bhagavatam, Bhagavad Gita, Upanishads, Vedas, and Puranas. The speaker often quotes Sanskrit shlokas and explains them in Telugu.
-
+        content: `You are an expert translator. Detect the tone and context of the input text and translate it into fluent, natural ${actualTarget}.
 Guidelines:
-- Preserve Sanskrit scriptural terms, deity names, sage names, and philosophical concepts (dharma, moksha, bhakti, jnana, karma, atma, paramatma, maya, leela, samsara, etc.) — you may keep them in Sanskrit or provide a brief English gloss
-- Recognize and correctly render names of scriptures (Bhagavatam, Gita, Ramayana, Mahabharata, etc.), chapters (Cantos/Skandhas), and key figures (Krishna, Vishnu, Shiva, Narada, Sukadeva, Parikshit, Arjuna, etc.)
-- Produce fluent, natural English that conveys the spiritual meaning accurately
-- Output ONLY the English translation — no explanations, no extra text`,
+- If the text is spiritual discourse, preserve Sanskrit scriptural terms.
+- Output ONLY the translated text — no explanations, no extra text.`,
       },
       {
         role: "user",
-        content: `${contextText}Translate this Telugu spiritual discourse to English:\n${teluguText}`,
+        content: `${contextText}Translate this ${detectedLanguage} text to ${actualTarget}:\n${sourceText}`,
       },
     ],
     temperature: 0.2,
     max_tokens: 1024,
   });
 
-  const englishText = chat.choices[0]?.message?.content?.trim() ?? "";
-  serverLog(`Groq LLaMA result: "${englishText.slice(0, 150)}"`);
-
+  const translatedText = chat.choices[0]?.message?.content?.trim() ?? "";
   const u = chat.usage;
   const usage: TokenUsage = {
     promptTokens:     u?.prompt_tokens     ?? 0,
@@ -153,27 +160,25 @@ Guidelines:
     totalTokens:      u?.total_tokens      ?? 0,
     contextWindow:    GROQ_CONTEXT_WINDOW,
   };
-  serverLog(`Groq tokens — prompt: ${usage.promptTokens}, completion: ${usage.completionTokens}, total: ${usage.totalTokens}`);
 
-  return { telugu: teluguText, english: englishText, usage };
+  return { sourceText, translatedText, detectedLanguage, usage };
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const { audio, mimeType, provider, groqKey, geminiKey, context } = await req.json();
+  const { audio, mimeType, provider, groqKey, geminiKey, context, targetLanguage } = await req.json();
 
   if (!audio) {
     return new Response(JSON.stringify({ error: "No audio data" }), { status: 400 });
   }
 
   const selectedProvider = provider === "groq" ? "groq" : "gemini";
-  const usingCustomKey = selectedProvider === "groq" ? !!groqKey?.trim() : !!geminiKey?.trim();
-  serverLog(`Request — provider: ${selectedProvider}, key: ${usingCustomKey ? "custom" : "server"}, mimeType: ${mimeType}, contextLen: ${context?.length ?? 0}, base64 length: ${audio.length} (~${(audio.length * 0.75 / 1024).toFixed(1)} KB)`);
+  const target = targetLanguage === "hindi" ? "hindi" : "english";
 
   try {
     const result = selectedProvider === "groq"
-      ? await transcribeWithGroq(audio, mimeType, groqKey, context)
-      : await transcribeWithGemini(audio, mimeType, geminiKey, context);
+      ? await transcribeWithGroq(audio, mimeType, groqKey, context, target)
+      : await transcribeWithGemini(audio, mimeType, geminiKey, context, target);
 
     return new Response(JSON.stringify(result), {
       headers: { "Content-Type": "application/json" },

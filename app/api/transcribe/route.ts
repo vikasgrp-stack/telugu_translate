@@ -31,7 +31,8 @@ const GEMINI_CONTEXT_WINDOW = 1_048_576;
 async function transcribeWithGemini(
   audio: string,
   mimeType: string,
-  apiKey?: string
+  apiKey?: string,
+  context?: string[]
 ): Promise<TranscribeResult> {
   const key = apiKey?.trim() || process.env.GEMINI_API_KEY!;
   if (!key) throw new Error("No Gemini API key configured");
@@ -39,6 +40,8 @@ async function transcribeWithGemini(
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
   serverLog("Gemini: calling gemini-2.0-flash-lite with audio");
+
+  const contextText = context?.length ? `Previous Telugu segments for context:\n${context.join("\n")}\n\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
@@ -48,7 +51,7 @@ Please:
 1. Transcribe the Telugu speech exactly as spoken, preserving Sanskrit words, shloka quotes, and names of deities, sages, or scriptural terms (e.g. Krishna, Vishnu, Brahma, dharma, moksha, bhakti, jnana, karma, atma, paramatma, maya, leela, samsara, etc.) as they are pronounced
 2. Translate the Telugu explanation to English, using standard English equivalents for well-known Sanskrit/scriptural terms where appropriate (e.g. "dharma", "moksha", "bhakti" can be kept as-is or briefly explained)
 
-Respond with ONLY a JSON object — no markdown, no code block:
+${contextText}Respond with ONLY a JSON object — no markdown, no code block:
 {"telugu":"<transcribed telugu>","english":"<english translation>"}
 
 If silent or no speech:
@@ -84,7 +87,8 @@ const GROQ_CONTEXT_WINDOW = 128_000;
 async function transcribeWithGroq(
   audio: string,
   mimeType: string,
-  apiKey?: string
+  apiKey?: string,
+  context?: string[]
 ): Promise<TranscribeResult> {
   const key = apiKey?.trim() || process.env.GROQ_API_KEY;
   if (!key) throw new Error("No Groq API key configured");
@@ -115,6 +119,8 @@ async function transcribeWithGroq(
   // Step 2: Translate Telugu → English with LLaMA
   serverLog("Groq: translating with llama-3.3-70b-versatile");
 
+  const contextText = context?.length ? `Context (previous Telugu): ${context.join(" ")}\n\n` : "";
+
   const chat = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: [
@@ -130,7 +136,7 @@ Guidelines:
       },
       {
         role: "user",
-        content: `Translate this Telugu spiritual discourse to English:\n${teluguText}`,
+        content: `${contextText}Translate this Telugu spiritual discourse to English:\n${teluguText}`,
       },
     ],
     temperature: 0.2,
@@ -154,7 +160,7 @@ Guidelines:
 
 // ── Route handler ─────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const { audio, mimeType, provider, groqKey, geminiKey } = await req.json();
+  const { audio, mimeType, provider, groqKey, geminiKey, context } = await req.json();
 
   if (!audio) {
     return new Response(JSON.stringify({ error: "No audio data" }), { status: 400 });
@@ -162,12 +168,12 @@ export async function POST(req: NextRequest) {
 
   const selectedProvider = provider === "groq" ? "groq" : "gemini";
   const usingCustomKey = selectedProvider === "groq" ? !!groqKey?.trim() : !!geminiKey?.trim();
-  serverLog(`Request — provider: ${selectedProvider}, key: ${usingCustomKey ? "custom" : "server"}, mimeType: ${mimeType}, base64 length: ${audio.length} (~${(audio.length * 0.75 / 1024).toFixed(1)} KB)`);
+  serverLog(`Request — provider: ${selectedProvider}, key: ${usingCustomKey ? "custom" : "server"}, mimeType: ${mimeType}, contextLen: ${context?.length ?? 0}, base64 length: ${audio.length} (~${(audio.length * 0.75 / 1024).toFixed(1)} KB)`);
 
   try {
     const result = selectedProvider === "groq"
-      ? await transcribeWithGroq(audio, mimeType, groqKey)
-      : await transcribeWithGemini(audio, mimeType, geminiKey);
+      ? await transcribeWithGroq(audio, mimeType, groqKey, context)
+      : await transcribeWithGemini(audio, mimeType, geminiKey, context);
 
     return new Response(JSON.stringify(result), {
       headers: { "Content-Type": "application/json" },

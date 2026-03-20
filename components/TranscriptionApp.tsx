@@ -153,7 +153,13 @@ export default function TranscriptionApp() {
       const base64 = btoa(binary);
       const mimeType = blob.type || "audio/webm";
 
-      addLog("api", `POST /api/transcribe — ${(base64.length / 1024).toFixed(1)} KB base64`);
+      // Get context from last 2 successful chunks to help with continuity
+      const context = chunks
+        .filter(c => !c.isTranslating && c.telugu)
+        .slice(-2)
+        .map(c => c.telugu);
+
+      addLog("api", `POST /api/transcribe — ${(base64.length / 1024).toFixed(1)} KB base64, context: ${context.length} chunks`);
 
       const response = await fetch("/api/transcribe", {
         method: "POST",
@@ -164,6 +170,7 @@ export default function TranscriptionApp() {
           provider: providerRef.current,
           groqKey:   groqKeyRef.current.trim()   || undefined,
           geminiKey: geminiKeyRef.current.trim() || undefined,
+          context:   context.length > 0 ? context : undefined,
         }),
       });
 
@@ -214,6 +221,7 @@ export default function TranscriptionApp() {
       // Remove the placeholder chunk — don't pollute transcript with error markers
       setChunks(prev => prev.filter(c => c.id !== chunkId));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addLog, scrollPanels]);
 
   // ── Flush: stop current recorder (delivers complete valid file), then restart

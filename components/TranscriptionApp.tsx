@@ -61,10 +61,13 @@ export default function TranscriptionApp() {
   const groqKeyRef                        = useRef("");
   const geminiKeyRef                      = useRef("");
 
+  // Refs to avoid stale closures in MediaRecorder callbacks
   const batchSecRef       = useRef(batchSec);
   const providerRef       = useRef(provider);
   const targetLanguageRef = useRef(targetLanguage);
   const isListeningRef    = useRef(false);
+  const chunksRef         = useRef<TranscriptChunk[]>([]);
+  
   const mediaRecorderRef  = useRef<MediaRecorder | null>(null);
   const batchTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownRef      = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -74,16 +77,11 @@ export default function TranscriptionApp() {
   const translatedPanelRef = useRef<HTMLDivElement>(null);
   const logPanelRef       = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    batchSecRef.current = batchSec;
-    if (isListeningRef.current) {
-      addLog("info", `Batch interval changed to ${batchSec}s — rescheduling timer`);
-      scheduleBatch();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchSec]);
+  // Sync refs with state
+  useEffect(() => { batchSecRef.current = batchSec; }, [batchSec]);
   useEffect(() => { providerRef.current = provider; }, [provider]);
   useEffect(() => { targetLanguageRef.current = targetLanguage; }, [targetLanguage]);
+  useEffect(() => { chunksRef.current = chunks; }, [chunks]);
 
   useEffect(() => {
     setGroqKey(localStorage.getItem(LS_GROQ_KEY)   ?? "");
@@ -113,9 +111,6 @@ export default function TranscriptionApp() {
       flushLogsToServer(pendingLogsRef.current);
       pendingLogsRef.current = [];
     }, 500);
-    setTimeout(() => {
-      if (logPanelRef.current) logPanelRef.current.scrollTop = logPanelRef.current.scrollHeight;
-    }, 0);
   }, [flushLogsToServer]);
 
   const clearLogs = useCallback(() => {
@@ -129,10 +124,10 @@ export default function TranscriptionApp() {
   }, []);
 
   const processAudioBlob = useCallback(async (blob: Blob) => {
-    addLog("audio", `Processing audio — size: ${(blob.size / 1024).toFixed(1)} KB`);
+    addLog("audio", `Processing batch...`);
 
     if (blob.size < 1000) {
-      addLog("warn", "Audio too small — skipping");
+      addLog("warn", "Audio too quiet — skipping");
       return;
     }
 
@@ -151,12 +146,11 @@ export default function TranscriptionApp() {
       const base64 = btoa(binary);
       const mimeType = blob.type || "audio/webm";
 
-      const context = chunks
+      // Use the REF to get the most recent chunks, avoiding stale closures
+      const context = chunksRef.current
         .filter(c => !c.isTranslating && c.sourceText)
-        .slice(-2)
+        .slice(-3)
         .map(c => c.sourceText);
-
-      addLog("api", `POST /api/transcribe — Target: ${targetLanguageRef.current}`);
 
       const response = await fetch("/api/transcribe", {
         method: "POST",
@@ -175,8 +169,6 @@ export default function TranscriptionApp() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
-      addLog("api", `Detected: ${data.detectedLanguage} | Text: "${data.sourceText.slice(0, 50)}..."`);
-
       if (data.usage) {
         const u = data.usage;
         const prev = tokenStatsRef.current;
@@ -194,7 +186,6 @@ export default function TranscriptionApp() {
       }
 
       if (!data.sourceText && !data.translatedText) {
-        addLog("warn", "No speech detected");
         setChunks(prev => prev.filter(c => c.id !== chunkId));
         return;
       }
@@ -206,10 +197,9 @@ export default function TranscriptionApp() {
       ));
       scrollPanels();
     } catch (err) {
-      addLog("error", `Failed: ${err instanceof Error ? err.message : String(err)}`);
+      addLog("error", `API Error: ${err instanceof Error ? err.message : String(err)}`);
       setChunks(prev => prev.filter(c => c.id !== chunkId));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addLog, scrollPanels]);
 
   const flushRecording = useCallback(() => {

@@ -25,9 +25,10 @@ type TranscribeResult = {
   usage: TokenUsage;
 };
 
-// ── Gemini ────────────────────────────────────────────────────────────────
 const GEMINI_CONTEXT_WINDOW = 1_048_576;
+const GROQ_CONTEXT_WINDOW = 128_000;
 
+// ── Gemini ────────────────────────────────────────────────────────────────
 async function transcribeWithGemini(
   audio: string,
   mimeType: string,
@@ -40,23 +41,22 @@ async function transcribeWithGemini(
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
-  serverLog(`Gemini: calling gemini-2.0-flash-lite with audio. Target: ${targetLang}`);
-
-  const contextText = context?.length ? `Previous segments for context:\n${context.join("\n")}\n\n` : "";
+  const contextText = context?.length ? `PREVIOUS CONTEXT (The speaker was just talking about): ${context.join(" ")}\n\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `This is audio from a speech. It may contain spiritual discourse or philosophical talk.
+    `You are a Contextual Interpreter and soulful translator. 
+Your goal is to capture the ESSENCE and MEANING of the speech, not just a word-for-word map.
 
 STRICT INSTRUCTIONS:
-1. STICK ONLY TO THE SPEECH IN THE AUDIO. Do not add any information, names, or concepts not mentioned.
-2. NO HALLUCINATIONS. If the audio contains silence, background noise, or is unclear, do not invent text. 
-3. DO NOT use flowery, poetic, or religious "filler" language unless the speaker specifically said those words.
-4. If the source is English and target is English, translate to Hindi. Otherwise translate to ${targetLang}.
-5. Transcribe exactly what is heard in the source language first.
+1. Detect the language and transcribe it exactly.
+2. Translate to ${targetLang}. (If source is English and target is English, use Hindi).
+3. SOULFUL TRANSLATION: Prioritize the speaker's intent, philosophical depth, and natural flow. The translation should read like a wise person explaining the message.
+4. NO HALLUCINATIONS: Do not invent facts, but do use appropriate vocabulary to convey the "heart" of the message.
+5. CONTINUITY: If context is provided, ensure this segment flows naturally from the previous ones.
 
 Respond with ONLY a JSON object:
-{"sourceText":"<exact transcription>","translatedText":"<strict translation>","detectedLanguage":"<language>"}
+{"sourceText":"<transcription>","translatedText":"<essence-based translation>","detectedLanguage":"<language>"}
 
 ${contextText}`,
   ]);
@@ -73,17 +73,13 @@ ${contextText}`,
   };
 
   try {
-    const parsed = JSON.parse(raw);
-    return { ...parsed, usage };
+    return { ...JSON.parse(raw), usage };
   } catch {
-    serverLog(`Gemini JSON parse failed: ${raw}`);
     return { sourceText: "", translatedText: raw, detectedLanguage: "unknown", usage };
   }
 }
 
 // ── Groq ──────────────────────────────────────────────────────────────────
-const GROQ_CONTEXT_WINDOW = 128_000;
-
 async function transcribeWithGroq(
   audio: string,
   mimeType: string,
@@ -98,8 +94,6 @@ async function transcribeWithGroq(
   const buffer = Buffer.from(audio, "base64");
   const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
   const file = new File([buffer], `audio.${ext}`, { type: mimeType });
-
-  serverLog(`Groq: transcribing with whisper-large-v3. Target: ${targetLang}`);
 
   const transcription = await groq.audio.transcriptions.create({
     file,
@@ -120,29 +114,27 @@ async function transcribeWithGroq(
     actualTarget = "hindi";
   }
 
-  serverLog(`Groq: translating to ${actualTarget}`);
-
-  const contextText = context?.length ? `Context: ${context.join(" ")}\n\n` : "";
+  const contextText = context?.length ? `PREVIOUS CONTEXT: ${context.join(" ")}\n\n` : "";
 
   const chat = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: [
       {
         role: "system",
-        content: `You are a strict, literal translator. 
-RULES:
-1. Translate the input text ONLY. 
-2. DO NOT add any background information, religious commentary, or poetic interpretations.
-3. If the input contains transcription errors (gibberish, random Bengali/Chinese characters, or nonsensical syllables), IGNORE THEM. Do not try to translate nonsense.
-4. Keep the tone identical to the source.
-5. Output ONLY the translated text.`,
+        content: `You are a Contextual Interpreter. Your mission is to translate with "soul" and "essence."
+1. Capture the MEANING and DEPTH of the message. 
+2. Do not do a literal word-for-word translation if it loses the spirit of the talk.
+3. Use natural, fluent, and profound language in ${actualTarget}.
+4. Maintain strict continuity with the provided context.
+5. If the input is noise or gibberish, return an empty string.
+6. Output ONLY the translated text.`,
       },
       {
         role: "user",
-        content: `${contextText}Translate this ${detectedLanguage} text to ${actualTarget}:\n${sourceText}`,
+        content: `${contextText}Capture the essence of this ${detectedLanguage} speech in ${actualTarget}:\n${sourceText}`,
       },
     ],
-    temperature: 0.1,
+    temperature: 0.3, // Slightly higher for more natural flow
     max_tokens: 1024,
   });
 
@@ -160,7 +152,6 @@ RULES:
 // ── Route handler ─────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const { audio, mimeType, provider, groqKey, geminiKey, context, targetLanguage } = await req.json();
-
   if (!audio) return new Response(JSON.stringify({ error: "No audio" }), { status: 400 });
 
   const selectedProvider = provider === "groq" ? "groq" : "gemini";
@@ -173,8 +164,6 @@ export async function POST(req: NextRequest) {
 
     return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    serverLog(`${selectedProvider} error: ${msg}`);
-    return new Response(JSON.stringify({ error: msg }), { status: 500 });
+    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), { status: 500 });
   }
 }

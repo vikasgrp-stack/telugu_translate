@@ -7,6 +7,9 @@ const LS_GROQ_KEY   = "tt_groq_key";
 const LS_GEMINI_KEY = "tt_gemini_key";
 const LS_CONTEXT    = "tt_global_context";
 
+const ENABLE_DONATIONS = process.env.NEXT_PUBLIC_ENABLE_DONATIONS === "true";
+const DONATION_URL     = process.env.NEXT_PUBLIC_DONATION_URL || "";
+
 type TranscriptChunk = {
   id: string;
   sourceText: string;
@@ -334,6 +337,16 @@ export default function TranscriptionApp() {
           <button onClick={() => setShowLogs(v => !v)} className={`text-sm px-3 py-1.5 rounded border transition-colors ${showLogs ? "border-sky-500 text-sky-400 bg-sky-900/30" : "border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-400"}`}>
             Logs {logs.length > 0 && <span className="ml-1 text-xs opacity-60">{logs.length}</span>}
           </button>
+          {ENABLE_DONATIONS && DONATION_URL && (
+            <a
+              href={DONATION_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white border border-rose-500/50 px-3 py-1.5 rounded transition-all flex items-center gap-1.5"
+            >
+              <span className="text-xs">❤</span> Support
+            </a>
+          )}
           <button onClick={clearAll} className="text-sm text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded border border-slate-600 hover:border-slate-400 transition-colors">
             Clear All
           </button>

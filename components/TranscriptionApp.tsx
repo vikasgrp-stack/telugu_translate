@@ -164,6 +164,57 @@ export default function TranscriptionApp() {
     if (translatedPanelRef.current) translatedPanelRef.current.scrollTop = translatedPanelRef.current.scrollHeight;
   }, []);
 
+  const saveToFile = useCallback(() => {
+    const data = chunksRef.current.filter(c => c.sourceText || c.translatedText);
+    if (data.length === 0) return;
+
+    const now = new Date();
+    const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}`;
+    const filename = `transcription_${ts}.json`;
+
+    const json = JSON.stringify(
+      {
+        meta: {
+          timestamp: now.toISOString(),
+          version: pkg.version,
+          provider: providerRef.current,
+          targetLanguage: targetLanguageRef.current,
+          globalContext: globalContextRef.current,
+          stats: tokenStatsRef.current,
+        },
+        transcript: data,
+      },
+      null,
+      2
+    );
+
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const stopListening = useCallback(() => {
+    isListeningRef.current = false;
+    setIsListening(false);
+    if (batchTimerRef.current) clearTimeout(batchTimerRef.current);
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    setNextFlushIn(null);
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder?.state === "recording") recorder.stop();
+    recorder?.stream?.getTracks().forEach(t => t.stop());
+
+    // Auto-save and purge logs on stop
+    saveToFile();
+    clearLogs();
+  }, [saveToFile, clearLogs]);
+
   const processAudioBlob = useCallback(async (blob: Blob) => {
     addLog("audio", `Processing batch...`);
     if (blob.size < 1000) return;
@@ -316,41 +367,6 @@ export default function TranscriptionApp() {
     stopListening();
     setChunks([]);
   }, [stopListening]);
-
-  const saveToFile = useCallback(() => {
-    const data = chunksRef.current.filter(c => c.sourceText || c.translatedText);
-    if (data.length === 0) return;
-
-    const now = new Date();
-    const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}`;
-    const filename = `transcription_${ts}.json`;
-
-    const json = JSON.stringify(
-      {
-        meta: {
-          timestamp: now.toISOString(),
-          version: pkg.version,
-          provider: providerRef.current,
-          targetLanguage: targetLanguageRef.current,
-          globalContext: globalContextRef.current,
-          stats: tokenStatsRef.current,
-        },
-        transcript: data,
-      },
-      null,
-      2
-    );
-
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, []);
 
   // UI Derived Labels
   const lastChunkWithLang = [...chunks].reverse().find(c => c.detectedLanguage);

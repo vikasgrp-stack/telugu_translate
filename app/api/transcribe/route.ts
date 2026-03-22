@@ -42,24 +42,24 @@ async function transcribeWithGemini(
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
-  const gContext = globalContext ? `SPEECH CONTEXT: ${globalContext}\n` : "";
+  const gContext = globalContext ? `GLOBAL CONTEXT: ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `You are a Faithful Semantic Translator. 
-Your goal is to map the source speech to ${targetLang} with 100% logic fidelity.
+    `You are a Coherent Domain Translator. 
+Your goal is to translate the speech so it is LOGICALLY CONSISTENT with the setting.
 
-STRICT GENERIC RULES:
+STRICT COHERENCE RULES:
 ${gContext}${recentContext}
-1. SEMANTIC ANCHORING: Every idea in the translation must exist in the source. Do not add "connective tissue," extra explanations, or "soulful" elaborations.
-2. NO EXPANSION: If the speaker says one short sentence, the translation must be one short sentence. 
-3. TONE MIRRORING: Match the speaker's complexity. If they use simple words, use simple words. If they are formal, be formal.
-4. NO HALLUCINATION: If a word is unclear, translate it literally or omit it—do not invent a "profound" meaning to fill the gap.
-5. CONTINUITY: Use the recent history only to resolve pronouns (he/she/it) and technical terms, not to continue a story that isn't being told.
+1. DOMAIN CHECK: This is a spiritual/ashram setting. If a word sounds like something out-of-place (e.g., "meat", "nagas/snakes", "curry"), replace it with the spiritually logical homophone (e.g., "Manasulo/Heart", "Nagalu/Jewelry", "Karu/Car").
+2. FAITHFUL MAPPING: Translate exactly what is said. Do not add interpretations.
+3. NO HALLUCINATION: If the audio is unclear, do not invent profound sounding sentences. 
+4. TONE MIRRORING: If the speaker is telling a simple story about their grandfather or childhood, use simple, direct language.
+5. PROPORTIONALITY: The translation length must match the speech length. No extra paragraphs.
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<faithful-translation>","detectedLanguage":"<language>"}`,
+{"sourceText":"<transcription>","translatedText":"<coherent-translation>","detectedLanguage":"<language>"}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -117,7 +117,7 @@ async function transcribeWithGroq(
     actualTarget = "hindi";
   }
 
-  const gContext = globalContext ? `SPEECH CONTEXT: ${globalContext}\n` : "";
+  const gContext = globalContext ? `GLOBAL CONTEXT: ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const chat = await groq.chat.completions.create({
@@ -125,21 +125,23 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a Faithful Semantic Translator. 
+        content: `You are a Coherent Domain Translator. 
 RULES:
 ${gContext}${recentContext}
-1. Translate the input text to ${actualTarget} with zero added information.
-2. Keep the length and complexity identical to the source.
-3. If the input is a story, do not summarize or elaborate—just translate the specific lines spoken.
-4. Do not add religious or philosophical "filler" that is not explicitly in the source audio.
-5. Output ONLY the translated text.`,
+1. COHERENCE: Ensure the translation makes sense within the provided Global Context. 
+2. SPIRITUAL HOMOPHONES: 
+   - "Manasulo" means "In the heart/mind". DO NOT translate as "Meat".
+   - "Nagalu" means "Jewelry/Jewels". DO NOT translate as "Nagas/Snakes".
+   - "Chettulu" means "Hands". "Chettu" means "Tree".
+3. LITERAL ACCURACY: Translate only the lines spoken. No added philosophy or dramatic summary.
+4. Output ONLY the translated text in ${actualTarget}.`,
       },
       {
         role: "user",
         content: `Translate this ${detectedLanguage} speech to ${actualTarget}:\n${sourceText}`,
       },
     ],
-    temperature: 0.1, // Near-zero temperature for maximum literalness
+    temperature: 0.1,
     max_tokens: 1024,
   });
 

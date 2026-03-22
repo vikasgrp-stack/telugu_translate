@@ -47,19 +47,23 @@ async function transcribeWithGemini(
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `You are a Coherent Domain Translator. 
-Your goal is to translate the speech so it is LOGICALLY CONSISTENT with the setting.
+    `You are a Specialized Spiritual Translator. 
+Your goal is to translate with 100% accuracy to the Vedic/Vaishnava domain.
 
-STRICT COHERENCE RULES:
+STRICT DOMAIN RULES:
 ${gContext}${recentContext}
-1. DOMAIN CHECK: This is a spiritual/ashram setting. If a word sounds like something out-of-place (e.g., "meat", "nagas/snakes", "curry"), replace it with the spiritually logical homophone (e.g., "Manasulo/Heart", "Nagalu/Jewelry", "Karu/Car").
-2. FAITHFUL MAPPING: Translate exactly what is said. Do not add interpretations.
-3. NO HALLUCINATION: If the audio is unclear, do not invent profound sounding sentences. 
-4. TONE MIRRORING: If the speaker is telling a simple story about their grandfather or childhood, use simple, direct language.
-5. PROPORTIONALITY: The translation length must match the speech length. No extra paragraphs.
+1. PHONETIC GLOSSARY (Priority):
+   - "Janmashtami" = Lord Krishna's Birthday (NEVER translate as "result" or "event").
+   - "Japa" = Chanting/Meditative Recitation (NEVER "discipline").
+   - "Hare Krishna" / "Hari" = God's names (NEVER "horses" or "hurry").
+   - "Krishnudu" / "Kestudu" = Lord Krishna (NEVER "caste").
+   - "Manasulo" = In the heart/mind (NEVER "meat").
+2. NARRATIVE FIDELITY: If a story about a king, monkey, or horse is told, keep the details literal to the story. Do not use modern idioms like "take a bullet."
+3. FAITHFUL MAPPING: Translate ONLY what is said. Do not add interpretations or extra sentences.
+4. NO HALLUCINATION: If a word is unclear, leave it or use the spiritually logical term.
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<coherent-translation>","detectedLanguage":"<language>"}`,
+{"sourceText":"<transcription>","translatedText":"<specialized-translation>","detectedLanguage":"<language>"}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -125,20 +129,21 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a Coherent Domain Translator. 
+        content: `You are a Specialized Spiritual Translator. 
 RULES:
 ${gContext}${recentContext}
-1. COHERENCE: Ensure the translation makes sense within the provided Global Context. 
-2. SPIRITUAL HOMOPHONES: 
-   - "Manasulo" means "In the heart/mind". DO NOT translate as "Meat".
-   - "Nagalu" means "Jewelry/Jewels". DO NOT translate as "Nagas/Snakes".
-   - "Chettulu" means "Hands". "Chettu" means "Tree".
-3. LITERAL ACCURACY: Translate only the lines spoken. No added philosophy or dramatic summary.
+1. DOMAIN ACCURACY: This is a Vaishnava/Hindu discourse.
+2. TERMS: 
+   - "Janmashtami" = Krishna's Appearance Day.
+   - "Japa" = Meditative Chanting.
+   - "Harisalle" / "Hare Krishna" = Holy Names.
+   - "Manasulo" = In the heart.
+3. CONSTRAINTS: Zero added info. Zero modern idioms (no "takes a bullet").
 4. Output ONLY the translated text in ${actualTarget}.`,
       },
       {
         role: "user",
-        content: `Translate this ${detectedLanguage} speech to ${actualTarget}:\n${sourceText}`,
+        content: `Translate this ${detectedLanguage} spiritual talk to ${actualTarget}:\n${sourceText}`,
       },
     ],
     temperature: 0.1,

@@ -14,6 +14,7 @@ type TranscriptChunk = {
   id: string;
   sourceText: string;
   translatedText: string;
+  correctedText?: string; // For feedback loop
   detectedLanguage?: string;
   isTranslating: boolean;
   error?: boolean;
@@ -60,6 +61,10 @@ export default function TranscriptionApp() {
   const [audioSource, setAudioSource]     = useState<"mic" | "system">("mic");
   const [globalContext, setGlobalContext] = useState("");
   const [onlineCount, setOnlineCount]     = useState(1);
+  const [editingId, setEditingId]         = useState<string | null>(null);
+  const [editText, setEditText]           = useState("");
+  const [analysis, setAnalysis]           = useState<any>(null);
+  const [analyzing, setAnalyzing]         = useState(false);
   const [tokenStats, setTokenStats]       = useState<TokenStats | null>(null);
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
   const [groqKey, setGroqKey]             = useState("");
@@ -167,40 +172,87 @@ export default function TranscriptionApp() {
     }, 100);
   }, []);
 
+  const analyzeQuality = useCallback(async () => {
+    const corrections = chunksRef.current.filter(c => c.correctedText && c.sourceText);
+    if (corrections.length === 0) {
+      addLog("warn", "No corrected chunks found to analyze.");
+      return;
+    }
+
+    setAnalyzing(true);
+    addLog("api", `Analyzing ${corrections.length} corrections for quality check...`);
+
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entries: corrections,
+          globalContext: globalContextRef.current,
+          geminiKey: geminiKeyRef.current.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Analysis failed");
+      setAnalysis(data);
+      addLog("info", "Quality analysis complete.");
+    } catch (err) {
+      addLog("error", `Analysis failed: ${err}`);
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [addLog]);
+
   const saveToFile = useCallback(() => {
+    // Filter chunks that have at least some text
     const data = chunksRef.current.filter(c => c.sourceText || c.translatedText);
-    if (data.length === 0) return;
+    if (data.length === 0) {
+      addLog("warn", "No transcript data to save.");
+      return;
+    }
+
+    addLog("info", `Preparing JSON download for ${data.length} chunks...`);
 
     const now = new Date();
     const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}`;
-    const filename = `transcription_${ts}.json`;
+    const filename = `session_${ts}_v${pkg.version}.json`;
 
-    const json = JSON.stringify(
-      {
-        meta: {
-          timestamp: now.toISOString(),
-          version: pkg.version,
-          provider: providerRef.current,
-          targetLanguage: targetLanguageRef.current,
-          globalContext: globalContextRef.current,
-          stats: tokenStatsRef.current,
-        },
-        transcript: data,
+    const payload = {
+      meta: {
+        timestamp: now.toISOString(),
+        version: pkg.version,
+        provider: providerRef.current,
+        targetLanguage: targetLanguageRef.current,
+        globalContext: globalContextRef.current,
+        stats: tokenStatsRef.current,
       },
-      null,
-      2
-    );
+      transcript: data,
+    };
 
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, []);
+    try {
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      
+      // Small timeout to ensure the browser registers the link in the DOM
+      setTimeout(() => {
+        link.click();
+        addLog("info", "Download triggered successfully.");
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 1000);
+      }, 100);
+    } catch (err) {
+      addLog("error", `Failed to generate JSON: ${err}`);
+    }
+  }, [addLog]);
 
   const stopListening = useCallback(() => {
     isListeningRef.current = false;
@@ -213,10 +265,14 @@ export default function TranscriptionApp() {
     if (recorder?.state === "recording") recorder.stop();
     recorder?.stream?.getTracks().forEach(t => t.stop());
 
-    // Auto-save and purge logs on stop
-    saveToFile();
-    clearLogs();
-  }, [saveToFile, clearLogs]);
+    addLog("info", "Listening stopped. Waiting for final processing...");
+
+    // Give it 2 seconds to finish any pending API calls before auto-saving
+    setTimeout(() => {
+      saveToFile();
+      clearLogs();
+    }, 2000);
+  }, [saveToFile, clearLogs, addLog]);
 
   const processAudioBlob = useCallback(async (blob: Blob) => {
     addLog("audio", `Processing batch...`);
@@ -400,6 +456,15 @@ export default function TranscriptionApp() {
           <button onClick={() => setShowLogs(v => !v)} className={`text-sm px-3 py-1.5 rounded border transition-colors ${showLogs ? "border-sky-500 text-sky-400 bg-sky-900/30" : "border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-400"}`}>
             Logs {logs.length > 0 && <span className="ml-1 text-xs opacity-60">{logs.length}</span>}
           </button>
+          {chunks.some(c => c.correctedText) && (
+            <button
+              onClick={analyzeQuality}
+              disabled={analyzing}
+              className={`text-sm px-3 py-1.5 rounded border transition-all ${analyzing ? "bg-amber-500/20 border-amber-500 text-amber-400" : "border-amber-600 text-amber-500 hover:bg-amber-600 hover:text-white"}`}
+            >
+              {analyzing ? "Analyzing..." : "Analyze Quality"}
+            </button>
+          )}
           {ENABLE_DONATIONS && DONATION_URL && (
             <a
               href={DONATION_URL}
@@ -487,6 +552,35 @@ export default function TranscriptionApp() {
         )}
       </div>
 
+      {analysis && (
+        <div className="px-6 py-4 bg-sky-950/30 border-b border-sky-900/50 shrink-0">
+          <div className="flex justify-between items-start mb-3">
+            <div>
+              <h3 className="text-sky-400 text-sm font-bold uppercase tracking-wider">Quality Analysis & Prompt Suggestions</h3>
+              <p className="text-slate-400 text-xs mt-1">{analysis.summary}</p>
+            </div>
+            <button onClick={() => setAnalysis(null)} className="text-slate-500 hover:text-white">✕</button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Suggested Rules:</span>
+              <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
+                {analysis.suggestedRules?.map((rule: string, i: number) => (
+                  <li key={i}>{rule}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Reasoning:</span>
+              <p className="text-xs text-slate-400 leading-relaxed italic">{analysis.reasoning}</p>
+            </div>
+          </div>
+          <div className="mt-4 p-2 bg-amber-900/20 border border-amber-700/30 rounded text-[10px] text-amber-200/70">
+            Tip: You can copy these rules and paste them into the "Speech Context" box to immediately improve the next session.
+          </div>
+        </div>
+      )}
+
       {tokenStats && (
         <div className="px-6 py-1.5 border-b border-slate-700 bg-slate-900/70 shrink-0 text-[10px] text-slate-500 uppercase tracking-widest flex gap-4">
           <span>Tokens: <span className="text-slate-300">{tokenStats.sessionTotal.toLocaleString()}</span></span>
@@ -517,14 +611,58 @@ export default function TranscriptionApp() {
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
+          <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0 flex justify-between items-center">
             <span className="text-xs font-semibold tracking-widest text-slate-400 uppercase">{targetLabel} — Translation</span>
+            <span className="text-[10px] text-slate-500 italic">Click text to correct</span>
           </div>
           <div ref={translatedPanelRef} className="flex-1 overflow-y-auto p-4 space-y-2 text-emerald-50/90 scroll-smooth">
             {chunks.map(chunk => (
-              <p key={chunk.id} className={`leading-relaxed ${chunk.isTranslating ? "text-slate-500 italic" : "text-slate-100"}`}>
-                {chunk.translatedText || (chunk.isTranslating ? "Translating…" : "")}
-              </p>
+              <div key={chunk.id} className="group relative">
+                {editingId === chunk.id ? (
+                  <div className="bg-slate-800 p-2 rounded border border-sky-500/50">
+                    <textarea
+                      autoFocus
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      onBlur={() => {
+                        setChunks(prev => prev.map(c => c.id === chunk.id ? { ...c, correctedText: editText } : c));
+                        setEditingId(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          setChunks(prev => prev.map(c => c.id === chunk.id ? { ...c, correctedText: editText } : c));
+                          setEditingId(null);
+                        }
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      className="w-full bg-transparent border-none outline-none text-sm text-white resize-none"
+                      rows={Math.max(2, editText.split("\n").length)}
+                    />
+                    <div className="text-[10px] text-sky-400 mt-1 flex justify-between">
+                      <span>Esc to cancel • Enter to save</span>
+                      <span className="text-slate-500">Correcting...</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p
+                    onClick={() => {
+                      setEditingId(chunk.id);
+                      setEditText(chunk.correctedText || chunk.translatedText || "");
+                    }}
+                    className={`leading-relaxed cursor-pointer hover:bg-white/5 transition-colors p-1 rounded -m-1 ${chunk.isTranslating ? "text-slate-500 italic" : "text-slate-100"}`}
+                  >
+                    {chunk.correctedText ? (
+                      <span className="flex flex-col">
+                        <span className="line-through text-slate-500 text-xs">{chunk.translatedText}</span>
+                        <span className="text-sky-300">{chunk.correctedText}</span>
+                      </span>
+                    ) : (
+                      chunk.translatedText || (chunk.isTranslating ? "Translating…" : "")
+                    )}
+                  </p>
+                )}
+              </div>
             ))}
           </div>
         </div>

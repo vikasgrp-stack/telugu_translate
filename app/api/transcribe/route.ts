@@ -38,19 +38,20 @@ async function transcribeWithGemini(
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `You are a Strict Semantic Translator. 
-Your goal is 100% literal fidelity to the speaker's words.
+    `Task: Translate the provided audio to ${targetLang}. 
+(If source is English and target is English, translate to Hindi).
 
-STRICT GENERIC RULES:
+Context:
 ${gContext}${recentContext}
-1. NO PREACHING: Do not add "Your mind is like..." or "Similarly, for us..." unless the speaker explicitly said those words. 
-2. ZERO ELABORATION: If the speaker tells a story, translate ONLY the story. Do not explain the "moral" or the "essence" of the story yourself.
-3. DOMAIN ACCURACY: Prioritize spiritual terms: Janmashtami, Japa, Hare Krishna, Manasulo (heart/mind), Nagalu (jewelry).
-4. CONCISENESS: Every English sentence must have a direct 1-to-1 counterpart in the source. Do not turn 1 sentence into 3.
-5. NO MODERN SLANG: Do not use idioms like "takes a bullet" or "scolded me."
+
+Rules:
+1. Be a faithful translator. Do not add explanations, analogies, or interpretations.
+2. Match the speaker's length and tone. 
+3. Prioritize spiritual terms: Janmashtami, Japa, Hare Krishna, Manasulo, Nagalu.
+4. If the audio is silent or contains only noise, return empty strings for source and translation.
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<strict-semantic-translation>","detectedLanguage":"<language>"}`,
+{"sourceText":"<transcription>","translatedText":"<translation>","detectedLanguage":"<language>"}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -116,21 +117,20 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a Strict Semantic Translator. 
-RULES:
+        content: `You are a professional spiritual translator. 
+Translate the input text to ${actualTarget} faithfully. 
 ${gContext}${recentContext}
-1. NO PREACHING: Do not add analogies or interpretations like "Your mind is like..." or "Similarly, we..." unless explicitly spoken.
-2. ZERO EXPANSION: Mirror the source text length exactly. 
-3. SPIRITUAL TERMS: Use Janmashtami, Japa, Hare Krishna, Manasulo (heart), Nagalu (jewelry).
-4. No modern idioms. No dramatic flair.
-5. Output ONLY the translated text in ${actualTarget}.`,
+- Do not add your own interpretations or analogies.
+- Maintain the original length.
+- Use correct terms: Janmashtami, Japa, Hare Krishna, Manasulo.
+- Output ONLY the translated text.`,
       },
       {
         role: "user",
-        content: `Translate this ${detectedLanguage} talk to ${actualTarget}:\n${sourceText}`,
+        content: `Text: ${sourceText}`,
       },
     ],
-    temperature: 0.1,
+    temperature: 0.3, // Increased to prevent repetition loops
     max_tokens: 1024,
   });
 

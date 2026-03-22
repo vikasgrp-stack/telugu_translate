@@ -42,25 +42,24 @@ async function transcribeWithGemini(
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
-  const gContext = globalContext ? `OVERALL SPEECH CONTEXT: ${globalContext}\n` : "";
+  const gContext = globalContext ? `SPEECH CONTEXT: ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `You are a Narrative Interpreter and Professional Translator.
-Capture the literal meaning AND the narrative flow of the speech.
+    `You are a Faithful Semantic Translator. 
+Your goal is to map the source speech to ${targetLang} with 100% logic fidelity.
 
-STRICT INSTRUCTIONS:
+STRICT GENERIC RULES:
 ${gContext}${recentContext}
-1. Detect language and transcribe exactly.
-2. Translate to ${targetLang}. (If source is English and target is English, use Hindi).
-3. ANALOGY & STORY AWARENESS: If the speaker is telling a story or using modern analogies (e.g., brand names like Joyalukkas, concepts like "World Tour", or parables about trees/animals), preserve the logic of the story accurately.
-4. KEYWORDS: "Nagalu" means Jewelry/Ornaments. "Korika" means Desire/Wish.
-5. GROUNDED ESSENCE: Capture the "heart" of the message without adding extra dramatic flair or philosophical sentences that aren't there.
-6. NO HALLUCINATIONS: Do not turn a story about "desires" into a story about "troubles".
+1. SEMANTIC ANCHORING: Every idea in the translation must exist in the source. Do not add "connective tissue," extra explanations, or "soulful" elaborations.
+2. NO EXPANSION: If the speaker says one short sentence, the translation must be one short sentence. 
+3. TONE MIRRORING: Match the speaker's complexity. If they use simple words, use simple words. If they are formal, be formal.
+4. NO HALLUCINATION: If a word is unclear, translate it literally or omit it—do not invent a "profound" meaning to fill the gap.
+5. CONTINUITY: Use the recent history only to resolve pronouns (he/she/it) and technical terms, not to continue a story that isn't being told.
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<accurate-narrative-translation>","detectedLanguage":"<language>"}`,
+{"sourceText":"<transcription>","translatedText":"<faithful-translation>","detectedLanguage":"<language>"}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -118,7 +117,7 @@ async function transcribeWithGroq(
     actualTarget = "hindi";
   }
 
-  const gContext = globalContext ? `OVERALL SPEECH CONTEXT: ${globalContext}\n` : "";
+  const gContext = globalContext ? `SPEECH CONTEXT: ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const chat = await groq.chat.completions.create({
@@ -126,23 +125,21 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a Narrative Interpreter. Your mission is to translate stories and discourses accurately in ${actualTarget}.
+        content: `You are a Faithful Semantic Translator. 
+RULES:
 ${gContext}${recentContext}
-1. IDENTIFY NARRATIVES: If the speaker is telling a story, ensure the sequence of events and the "moral" remains logical.
-2. ANALOGY ACCURACY: Maintain modern references used by the speaker (e.g. jewelry brands, world tours, discounts).
-3. TRANSLATION RULES:
-   - "Nagalu" = Jewelry/Jewels.
-   - "Korika" = Desire/Wish.
-   - "Chettu" = Tree.
-4. Capture the true MEANING without expanding the text into extra invented sentences.
+1. Translate the input text to ${actualTarget} with zero added information.
+2. Keep the length and complexity identical to the source.
+3. If the input is a story, do not summarize or elaborate—just translate the specific lines spoken.
+4. Do not add religious or philosophical "filler" that is not explicitly in the source audio.
 5. Output ONLY the translated text.`,
       },
       {
         role: "user",
-        content: `Capture the accurate essence and narrative of this ${detectedLanguage} speech in ${actualTarget}:\n${sourceText}`,
+        content: `Translate this ${detectedLanguage} speech to ${actualTarget}:\n${sourceText}`,
       },
     ],
-    temperature: 0.2,
+    temperature: 0.1, // Near-zero temperature for maximum literalness
     max_tokens: 1024,
   });
 

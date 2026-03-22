@@ -101,6 +101,7 @@ async function transcribeWithGroq(
     file,
     model: "whisper-large-v3",
     response_format: "verbose_json",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }) as any;
 
   const sourceText = transcription.text.trim();

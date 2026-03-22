@@ -199,22 +199,6 @@ export default function TranscriptionApp() {
     URL.revokeObjectURL(url);
   }, []);
 
-  const stopListening = useCallback(() => {
-    isListeningRef.current = false;
-    setIsListening(false);
-    if (batchTimerRef.current) clearTimeout(batchTimerRef.current);
-    if (countdownRef.current) clearInterval(countdownRef.current);
-    setNextFlushIn(null);
-
-    const recorder = mediaRecorderRef.current;
-    if (recorder?.state === "recording") recorder.stop();
-    recorder?.stream?.getTracks().forEach(t => t.stop());
-
-    // Auto-save and purge logs on stop
-    saveToFile();
-    clearLogs();
-  }, [saveToFile, clearLogs]);
-
   const processAudioBlob = useCallback(async (blob: Blob) => {
     addLog("audio", `Processing batch...`);
     if (blob.size < 1000) return;

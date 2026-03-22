@@ -120,12 +120,6 @@ export default function TranscriptionApp() {
   useEffect(() => { globalContextRef.current = globalContext; localStorage.setItem(LS_CONTEXT, globalContext); }, [globalContext]);
   useEffect(() => { chunksRef.current = chunks; }, [chunks]);
 
-  // Auto-scroll on new chunks
-  useEffect(() => {
-    scrollPanels();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chunks]);
-
   useEffect(() => {
     setGroqKey(localStorage.getItem(LS_GROQ_KEY)   ?? "");
     setGeminiKey(localStorage.getItem(LS_GEMINI_KEY) ?? "");
@@ -160,13 +154,6 @@ export default function TranscriptionApp() {
   const clearLogs = useCallback(() => {
     setLogs([]);
     fetch("/api/log", { method: "DELETE" }).catch(() => {});
-  }, []);
-
-  const scrollPanels = useCallback(() => {
-    setTimeout(() => {
-      if (sourcePanelRef.current) sourcePanelRef.current.scrollTop = sourcePanelRef.current.scrollHeight;
-      if (translatedPanelRef.current) translatedPanelRef.current.scrollTop = translatedPanelRef.current.scrollHeight;
-    }, 100);
   }, []);
 
   const saveToFile = useCallback(async () => {
@@ -398,6 +385,30 @@ export default function TranscriptionApp() {
     stopListening();
     setChunks([]);
   }, [stopListening]);
+
+  const scrollPanels = useCallback(() => {
+    // Longer timeout and explicit scroll commands
+    setTimeout(() => {
+      if (sourcePanelRef.current) {
+        sourcePanelRef.current.scrollTo({
+          top: sourcePanelRef.current.scrollHeight,
+          behavior: "smooth"
+        });
+      }
+      if (translatedPanelRef.current) {
+        translatedPanelRef.current.scrollTo({
+          top: translatedPanelRef.current.scrollHeight,
+          behavior: "smooth"
+        });
+      }
+    }, 200);
+  }, []);
+
+  useEffect(() => {
+    if (chunks.length > 0) {
+      scrollPanels();
+    }
+  }, [chunks, scrollPanels]);
 
   // UI Derived Labels
   const lastChunkWithLang = [...chunks].reverse().find(c => c.detectedLanguage);

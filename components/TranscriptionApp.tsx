@@ -160,8 +160,10 @@ export default function TranscriptionApp() {
   }, []);
 
   const scrollPanels = useCallback(() => {
-    if (sourcePanelRef.current) sourcePanelRef.current.scrollTop = sourcePanelRef.current.scrollHeight;
-    if (translatedPanelRef.current) translatedPanelRef.current.scrollTop = translatedPanelRef.current.scrollHeight;
+    setTimeout(() => {
+      if (sourcePanelRef.current) sourcePanelRef.current.scrollTop = sourcePanelRef.current.scrollHeight;
+      if (translatedPanelRef.current) translatedPanelRef.current.scrollTop = translatedPanelRef.current.scrollHeight;
+    }, 100);
   }, []);
 
   const saveToFile = useCallback(() => {

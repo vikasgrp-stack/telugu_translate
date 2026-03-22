@@ -49,6 +49,7 @@ let logIdCounter = 0;
 export default function TranscriptionApp() {
   const [isListening, setIsListening]     = useState(false);
   const [chunks, setChunks]               = useState<TranscriptChunk[]>([]);
+  const [error, setError]                 = useState<string | null>(null);
   const [nextFlushIn, setNextFlushIn]     = useState<number | null>(null);
   const [batchSec, setBatchSec]           = useState(30);
   const [logs, setLogs]                   = useState<LogEntry[]>([]);

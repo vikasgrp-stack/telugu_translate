@@ -42,25 +42,25 @@ async function transcribeWithGemini(
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
-  const gContext = globalContext ? `OVERALL SPEECH CONTEXT (Topic/Keywords): ${globalContext}\n` : "";
+  const gContext = globalContext ? `OVERALL SPEECH CONTEXT: ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `You are a Contextual Interpreter and professional translator. 
-Your goal is to capture the MEANING and SOUL of the speech while remaining GROUNDED.
+    `You are a Narrative Interpreter and Professional Translator.
+Capture the literal meaning AND the narrative flow of the speech.
 
 STRICT INSTRUCTIONS:
 ${gContext}${recentContext}
-1. Detect language and transcribe exactly what is said.
+1. Detect language and transcribe exactly.
 2. Translate to ${targetLang}. (If source is English and target is English, use Hindi).
-3. FIDELITY: Capture the philosophical essence, but DO NOT expand sentences or add extra paragraphs of interpretation. 
-4. CONCISENESS: Keep the translation length proportional to the amount of speech in the audio.
-5. NO HALLUCINATIONS: Do not invent facts, stories, or dramatic flair. Stay true to the speaker's actual words and pace.
-6. CONTINUITY: Ensure this segment flows naturally from the recent history.
+3. ANALOGY & STORY AWARENESS: If the speaker is telling a story or using modern analogies (e.g., brand names like Joyalukkas, concepts like "World Tour", or parables about trees/animals), preserve the logic of the story accurately.
+4. KEYWORDS: "Nagalu" means Jewelry/Ornaments. "Korika" means Desire/Wish.
+5. GROUNDED ESSENCE: Capture the "heart" of the message without adding extra dramatic flair or philosophical sentences that aren't there.
+6. NO HALLUCINATIONS: Do not turn a story about "desires" into a story about "troubles".
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<essence-based translation>","detectedLanguage":"<language>"}`,
+{"sourceText":"<transcription>","translatedText":"<accurate-narrative-translation>","detectedLanguage":"<language>"}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -118,7 +118,7 @@ async function transcribeWithGroq(
     actualTarget = "hindi";
   }
 
-  const gContext = globalContext ? `SPEECH CONTEXT: ${globalContext}\n` : "";
+  const gContext = globalContext ? `OVERALL SPEECH CONTEXT: ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const chat = await groq.chat.completions.create({
@@ -126,19 +126,23 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a Contextual Interpreter. Translate with "essence" but stay GROUNDED.
+        content: `You are a Narrative Interpreter. Your mission is to translate stories and discourses accurately in ${actualTarget}.
 ${gContext}${recentContext}
-1. Capture the true MEANING and HEART of the message. 
-2. DO NOT add your own philosophy or expand the text into extra sentences.
-3. Keep the translation concise and reflective of the source volume.
-4. Output ONLY the translated text in ${actualTarget}.`,
+1. IDENTIFY NARRATIVES: If the speaker is telling a story, ensure the sequence of events and the "moral" remains logical.
+2. ANALOGY ACCURACY: Maintain modern references used by the speaker (e.g. jewelry brands, world tours, discounts).
+3. TRANSLATION RULES:
+   - "Nagalu" = Jewelry/Jewels.
+   - "Korika" = Desire/Wish.
+   - "Chettu" = Tree.
+4. Capture the true MEANING without expanding the text into extra invented sentences.
+5. Output ONLY the translated text.`,
       },
       {
         role: "user",
-        content: `Capture the essence of this ${detectedLanguage} speech in ${actualTarget}:\n${sourceText}`,
+        content: `Capture the accurate essence and narrative of this ${detectedLanguage} speech in ${actualTarget}:\n${sourceText}`,
       },
     ],
-    temperature: 0.2, // Lower temperature for more stability
+    temperature: 0.2,
     max_tokens: 1024,
   });
 

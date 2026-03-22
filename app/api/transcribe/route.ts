@@ -1,19 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Groq from "groq-sdk";
 import { NextRequest } from "next/server";
-import fs from "fs";
-import path from "path";
-
-const LOG_FILE = path.join(process.cwd(), "logs", "session.log");
-if (!fs.existsSync(path.join(process.cwd(), "logs"))) {
-  fs.mkdirSync(path.join(process.cwd(), "logs"), { recursive: true });
-}
-
-function serverLog(msg: string) {
-  const now = new Date();
-  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
-  try { fs.appendFileSync(LOG_FILE, `${time} [SERVER] ${msg}\n`); } catch {}
-}
 
 export type TokenUsage = {
   promptTokens: number;
@@ -49,33 +36,25 @@ async function transcribeWithGemini(
   const gContext = globalContext ? `GLOBAL CONTEXT: ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
-  serverLog(`Gemini: processing audio (${(audio.length/1024).toFixed(1)} KB)`);
-
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `You are a Specialized Spiritual Translator. 
-Your goal is to translate with 100% accuracy to the Vedic/Vaishnava domain.
+    `You are a Strict Semantic Translator. 
+Your goal is 100% literal fidelity to the speaker's words.
 
-STRICT DOMAIN RULES:
+STRICT GENERIC RULES:
 ${gContext}${recentContext}
-1. PHONETIC GLOSSARY (Priority):
-   - "Janmashtami" = Lord Krishna's Birthday
-   - "Japa" = Chanting/Meditative Recitation
-   - "Hare Krishna" / "Hari" = God's names
-   - "Krishnudu" / "Kestudu" = Lord Krishna
-   - "Manasulo" = In the heart/mind
-2. NARRATIVE FIDELITY: Maintain literal story details.
-3. FAITHFUL MAPPING: Translate ONLY what is said.
-4. NO HALLUCINATION: If a word is unclear, leave it or use the spiritually logical term.
+1. NO PREACHING: Do not add "Your mind is like..." or "Similarly, for us..." unless the speaker explicitly said those words. 
+2. ZERO ELABORATION: If the speaker tells a story, translate ONLY the story. Do not explain the "moral" or the "essence" of the story yourself.
+3. DOMAIN ACCURACY: Prioritize spiritual terms: Janmashtami, Japa, Hare Krishna, Manasulo (heart/mind), Nagalu (jewelry).
+4. CONCISENESS: Every English sentence must have a direct 1-to-1 counterpart in the source. Do not turn 1 sentence into 3.
+5. NO MODERN SLANG: Do not use idioms like "takes a bullet" or "scolded me."
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<specialized-translation-in-${targetLang}>","detectedLanguage":"<language>"}`,
+{"sourceText":"<transcription>","translatedText":"<strict-semantic-translation>","detectedLanguage":"<language>"}`,
   ]);
 
   const raw = result.response.text().trim()
     .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
-
-  serverLog(`Gemini raw response: ${raw.slice(0, 300)}`);
 
   const meta = result.response.usageMetadata;
   const usage: TokenUsage = {
@@ -86,11 +65,8 @@ Respond with ONLY a JSON object:
   };
 
   try {
-    const parsed = JSON.parse(raw);
-    return { ...parsed, usage };
-  } catch (e) {
-    serverLog(`Gemini JSON parse failed. Raw: ${raw}`);
-    // Fallback if model doesn't return JSON
+    return { ...JSON.parse(raw), usage };
+  } catch {
     return { sourceText: "Error parsing result", translatedText: raw, detectedLanguage: "unknown", usage };
   }
 }
@@ -112,8 +88,6 @@ async function transcribeWithGroq(
   const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
   const file = new File([buffer], `audio.${ext}`, { type: mimeType });
 
-  serverLog(`Groq: starting Whisper transcribe...`);
-
   const transcription = await groq.audio.transcriptions.create({
     file,
     model: "whisper-large-v3",
@@ -125,8 +99,6 @@ async function transcribeWithGroq(
   const detectedLanguageCode = transcription.language || "unknown";
   const detectedLanguage = detectedLanguageCode.charAt(0).toUpperCase() + detectedLanguageCode.slice(1);
   
-  serverLog(`Groq: Whisper detected ${detectedLanguage}. Text: "${sourceText.slice(0, 50)}..."`);
-
   if (!sourceText || sourceText.length < 5) {
     return { sourceText: "", translatedText: "", detectedLanguage: "", usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, contextWindow: GROQ_CONTEXT_WINDOW } };
   }
@@ -144,17 +116,18 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a Specialized Spiritual Translator. 
+        content: `You are a Strict Semantic Translator. 
 RULES:
 ${gContext}${recentContext}
-1. DOMAIN ACCURACY: This is a Vaishnava/Hindu discourse.
-2. TERMS: "Janmashtami", "Japa", "Hare Krishna", "Manasulo".
-3. CONSTRAINTS: Zero added info.
-4. Output ONLY the translated text in ${actualTarget}.`,
+1. NO PREACHING: Do not add analogies or interpretations like "Your mind is like..." or "Similarly, we..." unless explicitly spoken.
+2. ZERO EXPANSION: Mirror the source text length exactly. 
+3. SPIRITUAL TERMS: Use Janmashtami, Japa, Hare Krishna, Manasulo (heart), Nagalu (jewelry).
+4. No modern idioms. No dramatic flair.
+5. Output ONLY the translated text in ${actualTarget}.`,
       },
       {
         role: "user",
-        content: `Translate this ${detectedLanguage} spiritual talk to ${actualTarget}:\n${sourceText}`,
+        content: `Translate this ${detectedLanguage} talk to ${actualTarget}:\n${sourceText}`,
       },
     ],
     temperature: 0.1,
@@ -162,8 +135,6 @@ ${gContext}${recentContext}
   });
 
   const translatedText = chat.choices[0]?.message?.content?.trim() ?? "";
-  serverLog(`Groq: Translation complete. (${translatedText.length} chars)`);
-
   const usage = {
     promptTokens:     chat.usage?.prompt_tokens     ?? 0,
     completionTokens: chat.usage?.completion_tokens ?? 0,
@@ -183,8 +154,6 @@ export async function POST(req: NextRequest) {
     const selectedProvider = provider === "groq" ? "groq" : "gemini";
     const target = targetLanguage === "hindi" ? "hindi" : "english";
 
-    serverLog(`Request: provider=${selectedProvider}, target=${target}, contextLen=${context?.length || 0}`);
-
     const result = selectedProvider === "groq"
       ? await transcribeWithGroq(audio, mimeType, groqKey, context, target, globalContext)
       : await transcribeWithGemini(audio, mimeType, geminiKey, context, target, globalContext);
@@ -192,7 +161,6 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    serverLog(`ERROR in transcribe route: ${msg}`);
     return new Response(JSON.stringify({ error: msg }), { status: 500 });
   }
 }

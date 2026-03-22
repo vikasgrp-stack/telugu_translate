@@ -292,7 +292,6 @@ export default function TranscriptionApp() {
           audioSeconds:   (prev?.audioSeconds  ?? 0) + batchSecRef.current,
           sessionStartMs: prev?.sessionStartMs ?? Date.now(),
         };
-        setTokenStats(tokenStatsRef.current);
       }
 
       setChunks(prev => prev.map(c =>

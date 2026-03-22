@@ -42,21 +42,22 @@ async function transcribeWithGemini(
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
-  const gContext = globalContext ? `OVERALL SPEECH CONTEXT: ${globalContext}\n` : "";
+  const gContext = globalContext ? `OVERALL SPEECH CONTEXT (Topic/Keywords): ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `You are a Contextual Interpreter and soulful translator. 
-Capture the ESSENCE and MEANING of the speech.
+    `You are a Contextual Interpreter and professional translator. 
+Your goal is to capture the MEANING and SOUL of the speech while remaining GROUNDED.
 
 STRICT INSTRUCTIONS:
 ${gContext}${recentContext}
-1. Detect language and transcribe exactly.
+1. Detect language and transcribe exactly what is said.
 2. Translate to ${targetLang}. (If source is English and target is English, use Hindi).
-3. SOULFUL TRANSLATION: Prioritize the speaker's intent and philosophical depth. Use natural flow.
-4. NO HALLUCINATIONS: Stick to the speech, but use the provided context to understand technical terms or names correctly.
-5. CONTINUITY: Ensure this segment flows naturally from the recent history.
+3. FIDELITY: Capture the philosophical essence, but DO NOT expand sentences or add extra paragraphs of interpretation. 
+4. CONCISENESS: Keep the translation length proportional to the amount of speech in the audio.
+5. NO HALLUCINATIONS: Do not invent facts, stories, or dramatic flair. Stay true to the speaker's actual words and pace.
+6. CONTINUITY: Ensure this segment flows naturally from the recent history.
 
 Respond with ONLY a JSON object:
 {"sourceText":"<transcription>","translatedText":"<essence-based translation>","detectedLanguage":"<language>"}`,
@@ -117,7 +118,7 @@ async function transcribeWithGroq(
     actualTarget = "hindi";
   }
 
-  const gContext = globalContext ? `OVERALL SPEECH CONTEXT: ${globalContext}\n` : "";
+  const gContext = globalContext ? `SPEECH CONTEXT: ${globalContext}\n` : "";
   const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
 
   const chat = await groq.chat.completions.create({
@@ -125,19 +126,19 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a Contextual Interpreter.
+        content: `You are a Contextual Interpreter. Translate with "essence" but stay GROUNDED.
 ${gContext}${recentContext}
-1. Capture the MEANING and SOUL of the message. 
-2. Use natural, profound language in ${actualTarget}.
-3. Maintain strict continuity with the provided context.
-4. Output ONLY the translated text.`,
+1. Capture the true MEANING and HEART of the message. 
+2. DO NOT add your own philosophy or expand the text into extra sentences.
+3. Keep the translation concise and reflective of the source volume.
+4. Output ONLY the translated text in ${actualTarget}.`,
       },
       {
         role: "user",
         content: `Capture the essence of this ${detectedLanguage} speech in ${actualTarget}:\n${sourceText}`,
       },
     ],
-    temperature: 0.3,
+    temperature: 0.2, // Lower temperature for more stability
     max_tokens: 1024,
   });
 

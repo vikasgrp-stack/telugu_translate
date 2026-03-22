@@ -62,7 +62,6 @@ export default function TranscriptionApp() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [auditReport, setAuditReport]     = useState<any>(null);
   const [saving, setSaving]               = useState(false);
-  const [tokenStats, setTokenStats]       = useState<TokenStats | null>(null);
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
   const [groqKey, setGroqKey]             = useState("");
   const [geminiKey, setGeminiKey]         = useState("");
@@ -361,7 +360,6 @@ export default function TranscriptionApp() {
     logIdCounter = 0;
     pendingLogsRef.current = [];
     tokenStatsRef.current = null;
-    setTokenStats(null);
     setAuditReport(null);
 
     try {

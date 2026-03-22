@@ -1,32 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Groq from "groq-sdk";
 import { NextRequest } from "next/server";
-import fs from "fs";
-import path from "path";
-
-const LOG_FILE = path.join(process.cwd(), "logs", "session.log");
-function serverLog(msg: string) {
-  const now = new Date();
-  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
-  try { fs.appendFileSync(LOG_FILE, `${time} [SERVER] ${msg}\n`); } catch {}
-}
-
-export type TokenUsage = {
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  contextWindow: number;
-};
-
-type TranscribeResult = {
-  sourceText: string;
-  translatedText: string;
-  detectedLanguage: string;
-  usage: TokenUsage;
-};
-
-const GEMINI_CONTEXT_WINDOW = 1_048_576;
-const GROQ_CONTEXT_WINDOW = 128_000;
 
 // ── Gemini ────────────────────────────────────────────────────────────────
 async function transcribeWithGemini(
@@ -63,7 +37,7 @@ ${gContext}${recentContext}
 4. NO HALLUCINATION: If a word is unclear, leave it or use the spiritually logical term.
 
 Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<specialized-translation>","detectedLanguage":"<language>"}`,
+{"sourceText":"<transcription>","translatedText":"<specialized-translation-in-${targetLang}>","detectedLanguage":"<language>"}`,
   ]);
 
   const raw = result.response.text().trim()

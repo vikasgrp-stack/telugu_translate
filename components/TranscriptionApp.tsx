@@ -57,6 +57,7 @@ export default function TranscriptionApp() {
   const [recording, setRecording]         = useState(false);
   const [provider, setProvider]           = useState<"gemini" | "groq">("groq");
   const [targetLanguage, setTargetLanguage] = useState<"english" | "hindi">("english");
+  const [audioSource, setAudioSource]     = useState<"mic" | "system">("mic");
   const [globalContext, setGlobalContext] = useState("");
   const [onlineCount, setOnlineCount]     = useState(1);
   const [tokenStats, setTokenStats]       = useState<TokenStats | null>(null);
@@ -338,16 +339,37 @@ export default function TranscriptionApp() {
     setTokenStats(null);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { autoGainControl: true } });
+      let stream: MediaStream;
+      if (audioSource === "system") {
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true,
+        });
+        const audioTracks = displayStream.getAudioTracks();
+        if (audioTracks.length === 0) {
+          displayStream.getTracks().forEach(t => t.stop());
+          throw new Error("No audio shared. Please ensure you check 'Share system audio' or 'Share tab audio' when selecting the screen.");
+        }
+        stream = new MediaStream(audioTracks);
+
+        // Auto-stop if user clicks "Stop sharing" in the browser UI
+        displayStream.getVideoTracks()[0]?.addEventListener("ended", () => {
+          stopListening();
+        });
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { autoGainControl: true } });
+      }
+
       isListeningRef.current = true;
       setIsListening(true);
       setError(null);
       startRecorderSegment(stream);
       scheduleBatch();
-    } catch {
-      setError("Microphone access denied.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg.includes("NotAllowedError") ? "Audio access denied or cancelled." : msg);
     }
-  }, [startRecorderSegment, scheduleBatch]);
+  }, [audioSource, startRecorderSegment, scheduleBatch, stopListening]);
 
   const clearAll = useCallback(() => {
     stopListening();
@@ -427,6 +449,14 @@ export default function TranscriptionApp() {
         <button onClick={isListening ? stopListening : startListening} className={`px-5 py-2 rounded-full font-medium text-sm transition-all shrink-0 ${isListening ? "bg-red-500 hover:bg-red-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white"}`}>
           {isListening ? "Stop Listening" : "Start Listening"}
         </button>
+
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-slate-400 shrink-0">Input:</span>
+          <select value={audioSource} onChange={(e) => setAudioSource(e.target.value as "mic" | "system")} disabled={isListening} className="bg-slate-800 text-slate-200 border border-slate-600 rounded px-2 py-1.5 text-sm disabled:opacity-40 focus:outline-none focus:border-slate-400">
+            <option value="mic">Microphone</option>
+            <option value="system">System Audio (Screen/Tab)</option>
+          </select>
+        </div>
 
         <div className="flex items-center gap-2 text-sm">
           <span className="text-slate-400 shrink-0">Translate to:</span>

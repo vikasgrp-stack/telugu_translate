@@ -239,9 +239,8 @@ export default function TranscriptionApp() {
     // Wait for last API calls to settle
     setTimeout(() => {
       saveToFile();
-      clearLogs();
     }, 2500);
-  }, [saveToFile, clearLogs, addLog]);
+  }, [saveToFile, addLog]);
 
   const processAudioBlob = useCallback(async (blob: Blob) => {
     addLog("audio", `Processing batch...`);

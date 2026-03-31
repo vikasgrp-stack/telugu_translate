@@ -19,15 +19,6 @@ type TranscribeResult = {
 const GEMINI_CONTEXT_WINDOW = 1_048_576;
 const GROQ_CONTEXT_WINDOW = 128_000;
 
-const FEW_SHOT_EXAMPLES = `
-GOLDEN EXAMPLES:
-Telugu: దేహినోఽస్మిన్ యథా దేహే కౌమారం యౌవనం జరా
-English: As the embodied soul continuously passes, in this body, from boyhood to youth to old age...
-
-Telugu: న జాయతే మ్రియతే వా కదాచిన్
-English: For the soul there is neither birth nor death at any time.
-`;
-
 // ── Gemini ────────────────────────────────────────────────────────────────
 async function transcribeWithGemini(
   audio: string,
@@ -42,25 +33,20 @@ async function transcribeWithGemini(
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
-  const gContext = globalContext ? `GLOBAL CONTEXT: ${globalContext}\n` : "";
-  const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
+  const gContext = globalContext ? `CONTEXT: ${globalContext}\n` : "";
+  const recentContext = context?.length ? `PREVIOUS: ${context.join(" ")}\n` : "";
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `Task: Translate the provided audio to ${targetLang}. 
-
-Context:
+    `Task: Translate Telugu audio to ${targetLang}. 
 ${gContext}${recentContext}
-
-${FEW_SHOT_EXAMPLES}
-
 Rules:
-1. Output ONLY a JSON object.
-2. The "translatedText" field MUST be in ${targetLang}. NEVER output Telugu in the translation field.
-3. Be faithful to the speaker's meaning.
+1. Output ONLY English. No Telugu script in translation.
+2. Be literal. Do not add interpretations or analogies.
+3. Handle spiritual terms correctly: Janmashtami, Japa, Hare Krishna.
 
-Respond with ONLY:
-{"sourceText":"<transcribed telugu>","translatedText":"<translated English or Hindi text>","detectedLanguage":"Telugu"}`,
+Respond with ONLY JSON:
+{"sourceText":"<telugu>","translatedText":"<english>","detectedLanguage":"Telugu"}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -77,7 +63,7 @@ Respond with ONLY:
   try {
     return { ...JSON.parse(raw), usage };
   } catch {
-    return { sourceText: "Error parsing", translatedText: raw, detectedLanguage: "unknown", usage };
+    return { sourceText: "Error", translatedText: raw, detectedLanguage: "unknown", usage };
   }
 }
 
@@ -118,28 +104,29 @@ async function transcribeWithGroq(
     actualTarget = "hindi";
   }
 
-  const gContext = globalContext ? `GLOBAL CONTEXT: ${globalContext}\n` : "";
-  const recentContext = context?.length ? `RECENT HISTORY: ${context.join(" ")}\n` : "";
+  const gContext = globalContext ? `CONTEXT: ${globalContext}\n` : "";
+  const recentContext = context?.length ? `PREVIOUS: ${context.join(" ")}\n` : "";
 
+  // Switching back to 70B for better reliability, but with strict length limits
   const chat = await groq.chat.completions.create({
-    model: "llama-3.1-8b-instant",
+    model: "llama-3.3-70b-versatile",
     messages: [
       {
         role: "system",
-        content: `You are a professional translator. 
-Translate the input text to ${actualTarget} faithfully. 
-${gContext}${recentContext}
-- NEVER output the source language text. 
-- ALWAYS output only the ${actualTarget} translation.
-- Output ONLY the translated text.`,
+        content: `You are a literal translator. 
+- Translate the provided text to ${actualTarget}.
+- DO NOT repeat the source text. 
+- DO NOT add analogies (no "Your mind is like").
+- DO NOT add politics or modern news (no "Corsica", "Prime Minister").
+- Output ONLY the ${actualTarget} translation.`,
       },
       {
         role: "user",
-        content: `Source Text (Telugu): ${sourceText}\nTranslation (${actualTarget}):`,
+        content: `${gContext}${recentContext}Text to translate: ${sourceText}`,
       },
     ],
-    temperature: 0.3,
-    max_tokens: 1024,
+    temperature: 0.2,
+    max_tokens: 512, // Limit tokens to avoid 429s
   });
 
   const translatedText = chat.choices[0]?.message?.content?.trim() ?? "";

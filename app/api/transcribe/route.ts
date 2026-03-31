@@ -19,6 +19,17 @@ type TranscribeResult = {
 const GEMINI_CONTEXT_WINDOW = 1_048_576;
 const GROQ_CONTEXT_WINDOW = 128_000;
 
+const FEW_SHOT_EXAMPLES = `
+GOLDEN EXAMPLES (Bhagavad Gita "As It Is" Style):
+Example 1:
+Telugu: దేహినోఽస్మిన్ యథా దేహే కౌమారం యౌవనం జరా | తథా దేహాంతరప్రాప్తిర్ధీరస్తత్ర న ముహ్యతి
+English: As the embodied soul continuously passes, in this body, from boyhood to youth to old age, the soul similarly passes into another body at death. A sober person is not bewildered by such a change.
+
+Example 2:
+Telugu: న జాయతే మ్రియతే వా కదాచిన్ నాయం భూత్వా భవితా వా న భూయః
+English: For the soul there is neither birth nor death at any time. He has not come into being, does not come into being, and will not come into being.
+`;
+
 // ── Gemini ────────────────────────────────────────────────────────────────
 async function transcribeWithGemini(
   audio: string,
@@ -38,17 +49,18 @@ async function transcribeWithGemini(
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `Task: Translate the provided audio to ${targetLang}. 
-(If source is English and target is English, translate to Hindi).
+    `Task: Translate the provided audio to ${targetLang} using "As It Is" scriptural accuracy.
 
 Context:
 ${gContext}${recentContext}
 
+${FEW_SHOT_EXAMPLES}
+
 Rules:
-1. Be a faithful translator. Do not add explanations, analogies, or interpretations.
-2. Match the speaker's length and tone. 
-3. Prioritize spiritual terms: Janmashtami, Japa, Hare Krishna, Manasulo, Nagalu.
-4. If the audio is silent or contains only noise, return empty strings for source and translation.
+1. FAITHFUL TRANSLATION: Match the speaker's meaning exactly. Do not add interpretations.
+2. SANSKRIT AWARENESS: Preserve Sanskrit shlokas and technical terms (Janmashtami, Japa, Manasulo).
+3. STYLE: Follow the clear, authoritative style of Bhagavad Gita As It Is.
+4. SILENCE: If only noise is present, return empty strings.
 
 Respond with ONLY a JSON object:
 {"sourceText":"<transcription>","translatedText":"<translation>","detectedLanguage":"<language>"}`,
@@ -117,12 +129,13 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a professional spiritual translator. 
-Translate the input text to ${actualTarget} faithfully. 
+        content: `You are a professional spiritual translator specializing in Bhagavad Gita and Bhagavatam. 
+Translate to ${actualTarget} with "As It Is" accuracy.
 ${gContext}${recentContext}
-- Do not add your own interpretations or analogies.
-- Maintain the original length.
-- Use correct terms: Janmashtami, Japa, Hare Krishna, Manasulo.
+${FEW_SHOT_EXAMPLES}
+- Preserve Sanskrit terms.
+- Mirror the speaker's length.
+- No interpretations.
 - Output ONLY the translated text.`,
       },
       {
@@ -130,7 +143,7 @@ ${gContext}${recentContext}
         content: `Text: ${sourceText}`,
       },
     ],
-    temperature: 0.3, // Increased to prevent repetition loops
+    temperature: 0.3,
     max_tokens: 1024,
   });
 

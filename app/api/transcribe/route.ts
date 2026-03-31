@@ -20,14 +20,12 @@ const GEMINI_CONTEXT_WINDOW = 1_048_576;
 const GROQ_CONTEXT_WINDOW = 128_000;
 
 const FEW_SHOT_EXAMPLES = `
-GOLDEN EXAMPLES (Bhagavad Gita "As It Is" Style):
-Example 1:
-Telugu: దేహినోఽస్మిన్ యథా దేహే కౌమారం యౌవనం జరా | తథా దేహాంతరప్రాప్తిర్ధీరస్తత్ర న ముహ్యతి
-English: As the embodied soul continuously passes, in this body, from boyhood to youth to old age, the soul similarly passes into another body at death. A sober person is not bewildered by such a change.
+GOLDEN EXAMPLES:
+Telugu: దేహినోఽస్మిన్ యథా దేహే కౌమారం యౌవనం జరా
+English: As the embodied soul continuously passes, in this body, from boyhood to youth to old age...
 
-Example 2:
-Telugu: న జాయతే మ్రియతే వా కదాచిన్ నాయం భూత్వా భవితా వా న భూయః
-English: For the soul there is neither birth nor death at any time. He has not come into being, does not come into being, and will not come into being.
+Telugu: న జాయతే మ్రియతే వా కదాచిన్
+English: For the soul there is neither birth nor death at any time.
 `;
 
 // ── Gemini ────────────────────────────────────────────────────────────────
@@ -49,7 +47,7 @@ async function transcribeWithGemini(
 
   const result = await model.generateContent([
     { inlineData: { mimeType: mimeType || "audio/webm", data: audio } },
-    `Task: Translate the provided audio to ${targetLang} using "As It Is" scriptural accuracy.
+    `Task: Translate the provided audio to ${targetLang}. 
 
 Context:
 ${gContext}${recentContext}
@@ -57,13 +55,12 @@ ${gContext}${recentContext}
 ${FEW_SHOT_EXAMPLES}
 
 Rules:
-1. FAITHFUL TRANSLATION: Match the speaker's meaning exactly. Do not add interpretations.
-2. SANSKRIT AWARENESS: Preserve Sanskrit shlokas and technical terms (Janmashtami, Japa, Manasulo).
-3. STYLE: Follow the clear, authoritative style of Bhagavad Gita As It Is.
-4. SILENCE: If only noise is present, return empty strings.
+1. Output ONLY a JSON object.
+2. The "translatedText" field MUST be in ${targetLang}. NEVER output Telugu in the translation field.
+3. Be faithful to the speaker's meaning.
 
-Respond with ONLY a JSON object:
-{"sourceText":"<transcription>","translatedText":"<translation>","detectedLanguage":"<language>"}`,
+Respond with ONLY:
+{"sourceText":"<transcribed telugu>","translatedText":"<translated English or Hindi text>","detectedLanguage":"Telugu"}`,
   ]);
 
   const raw = result.response.text().trim()
@@ -80,7 +77,7 @@ Respond with ONLY a JSON object:
   try {
     return { ...JSON.parse(raw), usage };
   } catch {
-    return { sourceText: "Error parsing result", translatedText: raw, detectedLanguage: "unknown", usage };
+    return { sourceText: "Error parsing", translatedText: raw, detectedLanguage: "unknown", usage };
   }
 }
 
@@ -129,18 +126,16 @@ async function transcribeWithGroq(
     messages: [
       {
         role: "system",
-        content: `You are a professional spiritual translator specializing in Bhagavad Gita and Bhagavatam. 
-Translate to ${actualTarget} with "As It Is" accuracy.
+        content: `You are a professional translator. 
+Translate the input text to ${actualTarget} faithfully. 
 ${gContext}${recentContext}
-${FEW_SHOT_EXAMPLES}
-- Preserve Sanskrit terms.
-- Mirror the speaker's length.
-- No interpretations.
+- NEVER output the source language text. 
+- ALWAYS output only the ${actualTarget} translation.
 - Output ONLY the translated text.`,
       },
       {
         role: "user",
-        content: `Text: ${sourceText}`,
+        content: `Source Text (Telugu): ${sourceText}\nTranslation (${actualTarget}):`,
       },
     ],
     temperature: 0.3,

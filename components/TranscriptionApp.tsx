@@ -384,24 +384,28 @@ export default function TranscriptionApp() {
   const clearAll = useCallback(() => {
     stopListening();
     setChunks([]);
-  }, [stopListening]);
+    setAuditReport(null);
+    clearLogs();
+  }, [stopListening, clearLogs]);
+
+  const clearTranscript = useCallback(() => {
+    setChunks([]);
+    setAuditReport(null);
+  }, []);
 
   const scrollPanels = useCallback(() => {
-    // Longer timeout and explicit scroll commands
-    setTimeout(() => {
-      if (sourcePanelRef.current) {
-        sourcePanelRef.current.scrollTo({
-          top: sourcePanelRef.current.scrollHeight,
-          behavior: "smooth"
-        });
+    // Force scroll to bottom for both panels
+    const scroll = (ref: React.RefObject<HTMLDivElement | null>) => {
+      if (ref.current) {
+        ref.current.scrollTop = ref.current.scrollHeight;
       }
-      if (translatedPanelRef.current) {
-        translatedPanelRef.current.scrollTo({
-          top: translatedPanelRef.current.scrollHeight,
-          behavior: "smooth"
-        });
-      }
-    }, 200);
+    };
+    
+    // Call multiple times to handle slow rendering or layout shifts
+    scroll(sourcePanelRef);
+    scroll(translatedPanelRef);
+    setTimeout(() => { scroll(sourcePanelRef); scroll(translatedPanelRef); }, 50);
+    setTimeout(() => { scroll(sourcePanelRef); scroll(translatedPanelRef); }, 150);
   }, []);
 
   useEffect(() => {
@@ -447,6 +451,9 @@ export default function TranscriptionApp() {
               <span className="text-xs">❤</span> Support
             </a>
           )}
+          <button onClick={clearTranscript} className="text-sm text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded border border-slate-600 hover:border-slate-400 transition-colors">
+            Clear Transcript
+          </button>
           <button onClick={clearAll} className="text-sm text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded border border-slate-600 hover:border-slate-400 transition-colors">
             Clear All
           </button>

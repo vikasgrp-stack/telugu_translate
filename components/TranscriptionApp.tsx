@@ -54,6 +54,7 @@ export default function TranscriptionApp() {
   const [batchSec, setBatchSec]           = useState(30);
   const [logs, setLogs]                   = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs]           = useState(false);
+  const [showSidebar, setShowSidebar]     = useState(true);
   const [recording, setRecording]         = useState(false);
   const [provider, setProvider]           = useState<"gemini" | "groq">("groq");
   const [targetLanguage, setTargetLanguage] = useState<"english" | "hindi">("english");
@@ -66,7 +67,6 @@ export default function TranscriptionApp() {
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
   const [groqKey, setGroqKey]             = useState("");
   const [geminiKey, setGeminiKey]         = useState("");
-  const [showKeys, setShowKeys]           = useState(false);
   const [keysVisible, setKeysVisible]     = useState(false);
   const groqKeyRef                        = useRef("");
   const geminiKeyRef                      = useRef("");
@@ -337,7 +337,7 @@ export default function TranscriptionApp() {
   const startListening = useCallback(async () => {
     const needsKey = providerRef.current === "groq" ? !groqKeyRef.current.trim() : !geminiKeyRef.current.trim();
     if (needsKey) {
-      setShowKeys(true);
+      setShowSidebar(true);
       setError(`Please enter your ${providerRef.current === "groq" ? "Groq" : "Gemini"} API key.`);
       return;
     }
@@ -420,202 +420,243 @@ export default function TranscriptionApp() {
   const targetLabel = targetLanguage === "english" ? (lastChunkWithLang?.detectedLanguage?.toLowerCase() === "english" ? "Hindi" : "English") : "Hindi";
   
   return (
-    <div className="min-h-screen flex flex-col bg-slate-900 text-slate-100 font-sans">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-slate-700 shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold text-white">Universal Transcriber</h1>
-          {isListening && (
-            <span className="flex items-center gap-1.5 text-emerald-400 text-sm">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              {recording ? "Recording" : "Processing..."}
-            </span>
-          )}
-          {saving && (
-            <span className="text-amber-400 text-xs animate-pulse">Finalizing Session...</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowKeys(v => !v)} className={`text-sm px-3 py-1.5 rounded border transition-colors ${showKeys ? "border-amber-500 text-amber-400 bg-amber-900/20" : "border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-400"}`}>
-            API Keys
-          </button>
-          <button onClick={() => setShowLogs(v => !v)} className={`text-sm px-3 py-1.5 rounded border transition-colors ${showLogs ? "border-sky-500 text-sky-400 bg-sky-900/30" : "border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-400"}`}>
-            Logs {logs.length > 0 && <span className="ml-1 text-xs opacity-60">{logs.length}</span>}
-          </button>
-          {ENABLE_DONATIONS && DONATION_URL && (
-            <a
-              href={DONATION_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white border border-rose-500/50 px-3 py-1.5 rounded transition-all flex items-center gap-1.5"
-            >
-              <span className="text-xs">❤</span> Support
-            </a>
-          )}
-          <button onClick={clearTranscript} className="text-sm text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded border border-slate-600 hover:border-slate-400 transition-colors">
-            Clear Transcript
-          </button>
-          <button onClick={clearAll} className="text-sm text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded border border-slate-600 hover:border-slate-400 transition-colors">
-            Clear All
-          </button>
-        </div>
-      </header>
-
-      {showKeys && (
-        <div className="px-6 py-4 border-b border-amber-900/40 bg-amber-950/20 shrink-0">
-          <div className="flex flex-wrap gap-6 items-end">
-            <div className="flex flex-col gap-1.5 min-w-[280px] flex-1 max-w-sm">
-              <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Groq API Key</label>
-              <input type={keysVisible ? "text" : "password"} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="gsk_..." className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber-500" />
-            </div>
-            <div className="flex flex-col gap-1.5 min-w-[280px] flex-1 max-w-sm">
-              <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Gemini API Key</label>
-              <input type={keysVisible ? "text" : "password"} value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="AIza..." className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber-500" />
-            </div>
-            <button onClick={() => setKeysVisible(v => !v)} className="text-xs text-slate-500 hover:text-slate-300 px-3 py-2 rounded border border-slate-700 hover:border-slate-500">
-              {keysVisible ? "Hide" : "Show"}
-            </button>
+    <div className="min-h-screen flex bg-slate-900 text-slate-100 font-sans overflow-hidden">
+      {/* Sidebar */}
+      <aside className={`transition-all duration-300 border-r border-slate-800 bg-slate-900/50 flex flex-col shrink-0 ${showSidebar ? "w-80" : "w-0 overflow-hidden border-none"}`}>
+        <div className="p-6 flex flex-col gap-8 h-full overflow-y-auto custom-scrollbar">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Settings</h2>
+            <button onClick={() => setShowSidebar(false)} className="text-slate-500 hover:text-white lg:hidden">✕</button>
           </div>
+
+          <section className="space-y-6">
+            <div className="space-y-3">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">API Keys</label>
+              <div className="space-y-2">
+                <input type={keysVisible ? "text" : "password"} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="Groq Key" className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-500/50" />
+                <input type={keysVisible ? "text" : "password"} value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="Gemini Key" className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-500/50" />
+                <button onClick={() => setKeysVisible(v => !v)} className="text-[10px] text-slate-500 hover:text-slate-300 flex items-center gap-1">
+                  {keysVisible ? "Hide Keys" : "Show Keys"}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Audio Configuration</label>
+              <div className="space-y-4">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] text-slate-400">Source</span>
+                  <select value={audioSource} onChange={(e) => setAudioSource(e.target.value as "mic" | "system")} disabled={isListening} className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-sky-500/50">
+                    <option value="mic">Microphone</option>
+                    <option value="system">System Audio</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] text-slate-400">Provider</span>
+                  <select value={provider} onChange={(e) => setProvider(e.target.value as "gemini" | "groq")} disabled={isListening} className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-sky-500/50">
+                    <option value="groq">Groq (Whisper + LLaMA)</option>
+                    <option value="gemini">Gemini 2.0 Flash Lite</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] text-slate-400">Batch Size ({batchSec}s)</span>
+                  <input type="range" min={10} max={60} step={1} value={batchSec} onChange={(e) => setBatchSec(Number(e.target.value))} className="w-full accent-sky-500" />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Speech Context</label>
+              <textarea
+                value={globalContext}
+                onChange={(e) => setGlobalContext(e.target.value)}
+                placeholder="Topic, speakers, keywords..."
+                className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-sky-500/50 h-32 resize-none"
+              />
+            </div>
+          </section>
+
+          <footer className="mt-auto pt-6 border-t border-slate-800 space-y-4">
+            <div className="flex items-center gap-2 text-[10px] text-slate-500">
+              <span className={`w-1.5 h-1.5 rounded-full ${onlineCount > 0 ? "bg-emerald-500" : "bg-slate-700"}`} />
+              {onlineCount} user{onlineCount !== 1 ? "s" : ""} online
+            </div>
+            <div className="text-[10px] text-slate-600 font-mono">
+              v{pkg.version}
+            </div>
+          </footer>
         </div>
-      )}
+      </aside>
 
-      {/* Global Context Section */}
-      <div className="px-6 py-4 border-b border-slate-700 bg-slate-800/30">
-        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-[0.2em] mb-2">Speech Context (Topic, Speaker, Keywords)</label>
-        <textarea
-          value={globalContext}
-          onChange={(e) => setGlobalContext(e.target.value)}
-          placeholder="e.g., Spiritual lecture on Bhagavad Gita Chapter 2, speaker is explaining the soul..."
-          className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-sky-500/50 transition-colors resize-none h-20"
-        />
-      </div>
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col min-w-0">
+        <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-10">
+          <div className="flex items-center gap-4">
+            {!showSidebar && (
+              <button onClick={() => setShowSidebar(true)} className="p-2 -ml-2 text-slate-400 hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+              </button>
+            )}
+            <div className="flex flex-col">
+              <h1 className="text-sm font-bold text-white flex items-center gap-2">
+                Universal Transcriber
+                {isListening && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
+              </h1>
+              {isListening && nextFlushIn !== null && (
+                <span className="text-[10px] text-emerald-400 font-mono">Processing in {nextFlushIn}s</span>
+              )}
+            </div>
+          </div>
 
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-6 py-3 border-b border-slate-700 shrink-0 bg-slate-800/50">
-        <button onClick={isListening ? stopListening : startListening} className={`px-5 py-2 rounded-full font-medium text-sm transition-all shrink-0 ${isListening ? "bg-red-500 hover:bg-red-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white"}`}>
-          {isListening ? "Stop Listening" : "Start Listening"}
-        </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center bg-slate-800 rounded-lg p-1 mr-2 border border-slate-700">
+              <button onClick={() => setTargetLanguage("english")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "english" ? "bg-slate-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"}`}>ENGLISH</button>
+              <button onClick={() => setTargetLanguage("hindi")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "hindi" ? "bg-slate-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"}`}>HINDI</button>
+            </div>
 
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-400 shrink-0">Input:</span>
-          <select value={audioSource} onChange={(e) => setAudioSource(e.target.value as "mic" | "system")} disabled={isListening} className="bg-slate-800 text-slate-200 border border-slate-600 rounded px-2 py-1.5 text-sm disabled:opacity-40 focus:outline-none focus:border-slate-400">
-            <option value="mic">Microphone</option>
-            <option value="system">System Audio (Screen/Tab)</option>
-          </select>
-        </div>
+            <button onClick={isListening ? stopListening : startListening} className={`px-4 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all shadow-lg shadow-black/20 ${isListening ? "bg-rose-500 hover:bg-rose-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white"}`}>
+              {isListening ? "Stop" : "Start"}
+            </button>
 
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-400 shrink-0">Translate to:</span>
-          <select value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value as "english" | "hindi")} className="bg-slate-800 text-slate-200 border border-slate-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400">
-            <option value="english">English (Default)</option>
-            <option value="hindi">Hindi</option>
-          </select>
-        </div>
+            <div className="h-4 w-[1px] bg-slate-800 mx-1" />
 
-        <div className="flex items-center gap-3 text-sm text-slate-400">
-          <span className="shrink-0">Batch:</span>
-          <input type="range" min={10} max={60} step={1} value={batchSec} onChange={(e) => setBatchSec(Number(e.target.value))} className="w-32 accent-emerald-400 cursor-pointer" />
-          <span className="font-semibold text-slate-200">{batchSec}s</span>
-        </div>
+            <button onClick={clearTranscript} className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors">
+              Clear
+            </button>
+            <button onClick={clearAll} className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-rose-400 transition-colors">
+              Reset
+            </button>
 
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-400 shrink-0">Provider:</span>
-          <select value={provider} onChange={(e) => setProvider(e.target.value as "gemini" | "groq")} disabled={isListening} className="bg-slate-800 text-slate-200 border border-slate-600 rounded px-2 py-1.5 text-sm disabled:opacity-40 focus:outline-none focus:border-slate-400">
-            <option value="groq">Groq (Whisper + LLaMA)</option>
-            <option value="gemini">Gemini 2.0 Flash Lite</option>
-          </select>
-        </div>
+            {ENABLE_DONATIONS && DONATION_URL && (
+              <a href={DONATION_URL} target="_blank" rel="noopener noreferrer" className="ml-2 bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white border border-amber-500/50 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all">
+                SUPPORT
+              </a>
+            )}
+          </div>
+        </header>
 
-        {isListening && nextFlushIn !== null && (
-          <div className="flex items-center gap-2 text-sm ml-auto font-mono text-emerald-400">
-            Next batch in {nextFlushIn}s
+        {error && (
+          <div className="mx-6 mt-4 p-3 bg-rose-500/10 border border-rose-500/50 rounded-lg text-rose-400 text-xs flex items-center gap-3 animate-in slide-in-from-top-2">
+            <span className="shrink-0 font-bold">Error:</span> {error}
+            <button onClick={() => setError(null)} className="ml-auto hover:text-white">✕</button>
           </div>
         )}
-      </div>
 
-      {auditReport && (
-        <div className="px-6 py-4 bg-sky-950/30 border-b border-sky-900/50 shrink-0">
-          <div className="flex justify-between items-start mb-3">
-            <div>
-              <h3 className="text-sky-400 text-sm font-bold uppercase tracking-wider">Self-Audit Quality Report</h3>
-              <p className="text-slate-400 text-xs mt-1">Status: <span className={auditReport.status === "PASS" ? "text-emerald-400" : "text-red-400"}>{auditReport.status}</span></p>
-            </div>
-            <button onClick={() => setAuditReport(null)} className="text-slate-500 hover:text-white">✕</button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Suggested Prompt Rules:</span>
-              <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
-                {auditReport.suggestedRules?.map((rule: string, i: number) => (
-                  <li key={i}>{rule}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="space-y-2">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Analysis:</span>
-              <p className="text-xs text-slate-400 leading-relaxed italic">{auditReport.reasoning}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 flex flex-col border-r border-slate-700 overflow-hidden">
-          <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
-            <span className="text-xs font-semibold tracking-widest text-slate-400 uppercase">{detectedLabel} — Heard</span>
-          </div>
-          <div ref={sourcePanelRef} className="flex-1 overflow-y-auto p-4 space-y-2 scroll-smooth">
-            {chunks.map(chunk => (
-              <p key={chunk.id} className={`leading-relaxed ${chunk.isTranslating ? "text-slate-500 italic" : "text-slate-100"}`}>
-                {chunk.sourceText || (chunk.isTranslating ? "Transcribing…" : "")}
-              </p>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
-            <span className="text-xs font-semibold tracking-widest text-slate-400 uppercase">{targetLabel} — Translation</span>
-          </div>
-          <div ref={translatedPanelRef} className="flex-1 overflow-y-auto p-4 space-y-2 text-emerald-50/90 scroll-smooth">
-            {chunks.map(chunk => (
-              <p key={chunk.id} className={`leading-relaxed ${chunk.isTranslating ? "text-slate-500 italic" : "text-slate-100"}`}>
-                {chunk.translatedText || (chunk.isTranslating ? "Translating…" : "")}
-              </p>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {showLogs && (
-        <div className="shrink-0 border-t border-slate-700 bg-slate-950 flex flex-col h-40">
-          <div className="flex items-center justify-between px-4 py-1 border-b border-slate-800 shrink-0">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Debug Log</span>
-            <button onClick={clearLogs} className="text-[10px] text-slate-600 hover:text-slate-400">Clear</button>
-          </div>
-          <div ref={logPanelRef} className="flex-1 overflow-y-auto p-2 font-mono text-[10px] space-y-0.5">
-            {logs.map(entry => (
-              <div key={entry.id} className="flex gap-2">
-                <span className="text-slate-600 shrink-0">{entry.time}</span>
-                <span className={`shrink-0 w-10 ${LOG_COLORS[entry.level]}`}>[{entry.level}]</span>
-                <span className="text-slate-400">{entry.msg}</span>
+        <div className="flex-1 flex flex-col min-h-0">
+          {auditReport && (
+            <div className="mx-6 mt-6 p-6 bg-sky-500/5 border border-sky-500/20 rounded-2xl flex flex-col gap-4 animate-in zoom-in-95 duration-300">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-sky-400 text-xs font-bold uppercase tracking-[0.15em]">Quality Audit Report</h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className={`w-2 h-2 rounded-full ${auditReport.status === "PASS" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                    <span className={`text-[10px] font-bold ${auditReport.status === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>{auditReport.status}</span>
+                  </div>
+                </div>
+                <button onClick={() => setAuditReport(null)} className="text-slate-600 hover:text-white transition-colors">✕</button>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="space-y-3">
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Actionable Insights</span>
+                  <ul className="space-y-2">
+                    {auditReport.suggestedRules?.map((rule: string, i: number) => (
+                      <li key={i} className="text-xs text-slate-300 flex gap-2 leading-relaxed">
+                        <span className="text-sky-500 shrink-0">•</span> {rule}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="space-y-3">
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Reasoning</span>
+                  <p className="text-xs text-slate-400 leading-relaxed italic">{auditReport.reasoning}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
-      {/* Footer */}
-      <footer className="px-6 py-2 border-t border-slate-700 bg-slate-800/20 text-[10px] text-slate-500 flex justify-between items-center shrink-0">
-        <div className="flex items-center gap-4">
-          <span>Point mic toward the speaker. Audio processed every {batchSec}s.</span>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-slate-400">{onlineCount} user{onlineCount !== 1 ? "s" : ""} online</span>
+          <div className="flex-1 flex min-h-0 divide-x divide-slate-800">
+            {/* Source Panel */}
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="px-6 py-3 bg-slate-900/50 border-b border-slate-800 flex justify-between items-center shrink-0">
+                <span className="text-[10px] font-bold tracking-[0.2em] text-slate-500 uppercase">Input: {detectedLabel}</span>
+              </div>
+              <div ref={sourcePanelRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth">
+                {chunks.map(chunk => (
+                  <p key={chunk.id} className={`text-sm leading-[1.8] font-medium transition-colors duration-500 ${chunk.isTranslating ? "text-slate-600 italic" : "text-slate-200 hover:text-white"}`}>
+                    {chunk.sourceText || (chunk.isTranslating ? "Listening..." : "")}
+                  </p>
+                ))}
+                {chunks.length === 0 && !isListening && (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-2 opacity-50">
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                    <p className="text-[10px] font-bold uppercase tracking-widest">Ready to Transcribe</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Translation Panel */}
+            <div className="flex-1 flex flex-col min-w-0 bg-slate-950/20">
+              <div className="px-6 py-3 bg-slate-900/50 border-b border-slate-800 flex justify-between items-center shrink-0">
+                <span className="text-[10px] font-bold tracking-[0.2em] text-sky-500 uppercase">Translation: {targetLabel}</span>
+              </div>
+              <div ref={translatedPanelRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth">
+                {chunks.map(chunk => (
+                  <p key={chunk.id} className={`text-base leading-[1.8] font-medium transition-all duration-700 ${chunk.isTranslating ? "text-slate-700 italic translate-x-1" : "text-emerald-50/90 hover:text-white"}`}>
+                    {chunk.translatedText || (chunk.isTranslating ? "Translating..." : "")}
+                  </p>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
-        <div className="font-mono opacity-50">
-          v{pkg.version}
-        </div>
-      </footer>
+
+        {showLogs && (
+          <div className="h-48 border-t border-slate-800 bg-slate-950 flex flex-col animate-in slide-in-from-bottom-full duration-300">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-900 shrink-0">
+              <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">System Logs</span>
+              <div className="flex gap-4">
+                <button onClick={clearLogs} className="text-[9px] text-slate-600 hover:text-slate-400 font-bold uppercase">Clear</button>
+                <button onClick={() => setShowLogs(false)} className="text-[9px] text-slate-600 hover:text-white font-bold uppercase">✕</button>
+              </div>
+            </div>
+            <div ref={logPanelRef} className="flex-1 overflow-y-auto p-4 font-mono text-[9px] space-y-1 custom-scrollbar">
+              {logs.map(entry => (
+                <div key={entry.id} className="flex gap-4 border-b border-slate-900/50 pb-1">
+                  <span className="text-slate-700 shrink-0">{entry.time}</span>
+                  <span className={`shrink-0 w-12 font-bold ${LOG_COLORS[entry.level]}`}>[{entry.level.toUpperCase()}]</span>
+                  <span className="text-slate-500 whitespace-pre-wrap">{entry.msg}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Global Footer Actions */}
+        {!showLogs && logs.length > 0 && (
+          <div className="absolute bottom-4 right-6 flex items-center gap-2">
+            <button onClick={() => setShowLogs(true)} className="bg-slate-800/80 backdrop-blur border border-slate-700 text-slate-400 hover:text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-xl transition-all hover:scale-105">
+              LOGS ({logs.length})
+            </button>
+          </div>
+        )}
+      </main>
+
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.1);
+        }
+      `}</style>
     </div>
   );
 }

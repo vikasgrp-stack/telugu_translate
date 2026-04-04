@@ -420,28 +420,25 @@ export default function TranscriptionApp() {
   const targetLabel = targetLanguage === "english" ? (lastChunkWithLang?.detectedLanguage?.toLowerCase() === "english" ? "Hindi" : "English") : "Hindi";
   
   return (
-    <div className="min-h-screen flex bg-slate-900 text-slate-100 font-sans overflow-hidden">
+    <div className="min-h-screen flex bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-800 via-slate-900 to-slate-950 text-slate-100 font-sans overflow-hidden">
       {/* Sidebar */}
-      <aside className={`transition-all duration-300 border-r border-slate-800 bg-slate-900/50 flex flex-col shrink-0 ${showSidebar ? "w-80" : "w-0 overflow-hidden border-none"}`}>
+      <aside className={`transition-all duration-300 border-r border-slate-800/50 bg-slate-950/20 flex flex-col shrink-0 ${showSidebar ? "w-80" : "w-0 overflow-hidden border-none"}`}>
+
         <div className="p-6 flex flex-col gap-8 h-full overflow-y-auto custom-scrollbar">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Settings</h2>
+            <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Control Panel</h2>
             <button onClick={() => setShowSidebar(false)} className="text-slate-500 hover:text-white lg:hidden">✕</button>
           </div>
 
           <section className="space-y-6">
-            <div className="space-y-3">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">API Keys</label>
-              <div className="space-y-2">
-                <input type={keysVisible ? "text" : "password"} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="Groq Key" className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-500/50" />
-                <input type={keysVisible ? "text" : "password"} value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="Gemini Key" className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-500/50" />
-                <button onClick={() => setKeysVisible(v => !v)} className="text-[10px] text-slate-500 hover:text-slate-300 flex items-center gap-1">
-                  {keysVisible ? "Hide Keys" : "Show Keys"}
-                </button>
-              </div>
-            </div>
+            <button 
+              onClick={isListening ? stopListening : startListening} 
+              className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] transition-all shadow-xl hover:scale-[1.02] active:scale-[0.98] ${isListening ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20" : "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"}`}
+            >
+              {isListening ? "Stop Listening" : "Start Listening"}
+            </button>
 
-            <div className="space-y-3">
+            <div className="space-y-3 pt-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Audio Configuration</label>
               <div className="space-y-4">
                 <div className="flex flex-col gap-1.5">
@@ -460,8 +457,19 @@ export default function TranscriptionApp() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <span className="text-[10px] text-slate-400">Batch Size ({batchSec}s)</span>
-                  <input type="range" min={10} max={60} step={1} value={batchSec} onChange={(e) => setBatchSec(Number(e.target.value))} className="w-full accent-sky-500" />
+                  <input type="range" min={10} max={60} step={1} value={batchSec} onChange={(e) => setBatchSec(Number(e.target.value))} className="w-full accent-emerald-500" />
                 </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">API Keys</label>
+              <div className="space-y-2">
+                <input type={keysVisible ? "text" : "password"} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="Groq Key" className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-500/50" />
+                <input type={keysVisible ? "text" : "password"} value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="Gemini Key" className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-500/50" />
+                <button onClick={() => setKeysVisible(v => !v)} className="text-[10px] text-slate-500 hover:text-slate-300 flex items-center gap-1">
+                  {keysVisible ? "Hide Keys" : "Show Keys"}
+                </button>
               </div>
             </div>
 
@@ -489,8 +497,8 @@ export default function TranscriptionApp() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-10">
+      <main className="flex-1 flex flex-col min-w-0 bg-transparent">
+        <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800/50 bg-slate-900/40 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-4">
             {!showSidebar && (
               <button onClick={() => setShowSidebar(true)} className="p-2 -ml-2 text-slate-400 hover:text-white transition-colors">
@@ -500,23 +508,27 @@ export default function TranscriptionApp() {
             <div className="flex flex-col">
               <h1 className="text-sm font-bold text-white flex items-center gap-2">
                 Universal Transcriber
-                {isListening && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
+                {isListening && (
+                  <div className="flex items-center gap-1 h-3 ml-1">
+                    <div className="w-0.5 h-full bg-emerald-500 rounded-full animate-visualizer-1" />
+                    <div className="w-0.5 h-full bg-emerald-500 rounded-full animate-visualizer-2" />
+                    <div className="w-0.5 h-full bg-emerald-500 rounded-full animate-visualizer-3" />
+                  </div>
+                )}
               </h1>
               {isListening && nextFlushIn !== null && (
-                <span className="text-[10px] text-emerald-400 font-mono">Processing in {nextFlushIn}s</span>
+                <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-2">
+                  Processing in {nextFlushIn}s
+                </span>
               )}
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center bg-slate-800 rounded-lg p-1 mr-2 border border-slate-700">
+            <div className="flex items-center bg-slate-800/50 rounded-lg p-1 mr-2 border border-slate-700/50">
               <button onClick={() => setTargetLanguage("english")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "english" ? "bg-slate-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"}`}>ENGLISH</button>
               <button onClick={() => setTargetLanguage("hindi")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "hindi" ? "bg-slate-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"}`}>HINDI</button>
             </div>
-
-            <button onClick={isListening ? stopListening : startListening} className={`px-4 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all shadow-lg shadow-black/20 ${isListening ? "bg-rose-500 hover:bg-rose-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white"}`}>
-              {isListening ? "Stop" : "Start"}
-            </button>
 
             <div className="h-4 w-[1px] bg-slate-800 mx-1" />
 
@@ -534,6 +546,7 @@ export default function TranscriptionApp() {
             )}
           </div>
         </header>
+
 
         {error && (
           <div className="mx-6 mt-4 p-3 bg-rose-500/10 border border-rose-500/50 rounded-lg text-rose-400 text-xs flex items-center gap-3 animate-in slide-in-from-top-2">
@@ -656,6 +669,14 @@ export default function TranscriptionApp() {
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
           background: rgba(255, 255, 255, 0.1);
         }
+
+        @keyframes visualizer {
+          0%, 100% { height: 4px; opacity: 0.5; }
+          50% { height: 12px; opacity: 1; }
+        }
+        .animate-visualizer-1 { animation: visualizer 0.6s ease-in-out infinite; }
+        .animate-visualizer-2 { animation: visualizer 0.6s ease-in-out infinite 0.2s; }
+        .animate-visualizer-3 { animation: visualizer 0.6s ease-in-out infinite 0.4s; }
       `}</style>
     </div>
   );

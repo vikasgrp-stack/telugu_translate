@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSession, signIn, signOut } from "next-auth/react";
 import pkg from "../package.json";
 
 const LS_GROQ_KEY   = "tt_groq_key";

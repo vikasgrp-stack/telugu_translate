@@ -74,6 +74,7 @@ export default function TranscriptionApp() {
   const [auditReport, setAuditReport]     = useState<any>(null);
   const [tokenStats, setTokenStats]       = useState<TokenStats | null>(null);
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
+  const [credits, setCredits]             = useState<number | null>(null);
   
   const [groqKey, setGroqKey]             = useState("");
   const [geminiKey, setGeminiKey]         = useState("");
@@ -141,6 +142,21 @@ export default function TranscriptionApp() {
     const interval = setInterval(sendHeartbeat, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const fetchCredits = useCallback(async () => {
+    if (!session) return;
+    try {
+      const res = await fetch("/api/user/credits");
+      const data = await res.json();
+      if (data.credits !== undefined) setCredits(data.credits);
+    } catch (err) {
+      console.error("Failed to fetch credits:", err);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    fetchCredits();
+  }, [fetchCredits]);
 
   // Sync refs
   useEffect(() => { batchSecRef.current = batchSec; }, [batchSec]);
@@ -392,6 +408,8 @@ export default function TranscriptionApp() {
         .slice(-3)
         .map(c => ({ telugu: c.sourceText, english: c.translatedText }));
 
+      const isStreaming = providerRef.current === "gemini";
+
       const response = await fetch("/api/transcribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -404,41 +422,94 @@ export default function TranscriptionApp() {
           context:   context.length > 0 ? context : undefined,
           globalContext: globalContextRef.current.trim() || undefined,
           targetLanguage: targetLanguageRef.current,
+          stream: isStreaming,
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-
-      if (data.isDuplicate) {
-        setDuplicatesBlocked(prev => prev + 1);
-        addLog("api", "Duplicate ASR loop detected and blocked (tokens saved).");
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || `HTTP ${response.status}`);
       }
 
-      if (data.usage) {
-        const u = data.usage;
-        const prev = tokenStatsRef.current;
-        const newStats = {
-          sessionTotal:   (prev?.sessionTotal  ?? 0) + u.totalTokens,
-          lastPrompt:     u.promptTokens,
-          lastCompletion: u.completionTokens,
-          lastBatch:      u.totalTokens,
-          batchCount:     (prev?.batchCount    ?? 0) + 1,
-          audioSeconds:   (prev?.audioSeconds  ?? 0) + batchSecRef.current,
-          sessionStartMs: prev?.sessionStartMs ?? Date.now(),
-        };
-        tokenStatsRef.current = newStats;
-        setTokenStats(newStats);
-      }
+      const handleFinal = (data: any) => {
+        if (data.isDuplicate) {
+          setDuplicatesBlocked(prev => prev + 1);
+          addLog("api", "Duplicate ASR loop detected and blocked (tokens saved).");
+        }
 
-      setChunks(prev => prev.map(c =>
-        c.id === chunkId
-          ? { ...c, sourceText: data.sourceText, translatedText: data.translatedText, detectedLanguage: data.detectedLanguage, isTranslating: false }
-          : c
-      ));
+        if (data.usage) {
+          const u = data.usage;
+          const prev = tokenStatsRef.current;
+          const newStats = {
+            sessionTotal:   (prev?.sessionTotal  ?? 0) + u.totalTokens,
+            lastPrompt:     u.promptTokens,
+            lastCompletion: u.completionTokens,
+            lastBatch:      u.totalTokens,
+            batchCount:     (prev?.batchCount    ?? 0) + 1,
+            audioSeconds:   (prev?.audioSeconds  ?? 0) + batchSecRef.current,
+            sessionStartMs: prev?.sessionStartMs ?? Date.now(),
+          };
+          tokenStatsRef.current = newStats;
+          setTokenStats(newStats);
+        }
 
-      if (data.translatedText && !data.isDuplicate) {
-        speakText(data.translatedText, chunkId);
+        setChunks(prev => prev.map(c =>
+          c.id === chunkId
+            ? { ...c, sourceText: data.sourceText, translatedText: data.translatedText, detectedLanguage: data.detectedLanguage, isTranslating: false }
+            : c
+        ));
+
+        if (data.translatedText && !data.isDuplicate) {
+          speakText(data.translatedText, chunkId);
+        }
+      };
+
+      if (isStreaming && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentEvent = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            if (trimmed.startsWith("event: ")) {
+              currentEvent = trimmed.slice(7);
+            } else if (trimmed.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(trimmed.slice(6));
+                if (currentEvent === "final") {
+                  handleFinal(data);
+                } else if (currentEvent === "error") {
+                  addLog("error", `API Error: ${data.error}`);
+                } else {
+                  if (data.translationChunk) {
+                    setChunks(prev => prev.map(c =>
+                      c.id === chunkId ? { ...c, translatedText: (c.translatedText || "") + data.translationChunk } : c
+                    ));
+                  } else if (data.sourceChunk) {
+                    setChunks(prev => prev.map(c =>
+                      c.id === chunkId ? { ...c, sourceText: (c.sourceText || "") + data.sourceChunk } : c
+                    ));
+                  }
+                }
+                currentEvent = ""; // Reset for next SSE message
+              } catch (e) { /* partial JSON, ignore */ }
+            }
+          }
+        }
+      } else {
+        const data = await response.json();
+        handleFinal(data);
       }
     } catch (err) {
       addLog("error", `API Error: ${err instanceof Error ? err.message : String(err)}`);

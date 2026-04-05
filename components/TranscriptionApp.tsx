@@ -110,6 +110,9 @@ export default function TranscriptionApp() {
   const pendingLogsRef    = useRef<LogEntry[]>([]);
   const logFlushTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   
+  const sourcePanelRef    = useRef<HTMLDivElement>(null);
+  const translatedPanelRef = useRef<HTMLDivElement>(null);
+  const logPanelRef       = useRef<HTMLDivElement>(null);
   const bottomAnchorRef   = useRef<HTMLDivElement>(null);
 
   // ── Initialization & Cleanup ───────────────────────────────────────────────

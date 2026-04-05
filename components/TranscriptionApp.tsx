@@ -302,15 +302,18 @@ export default function TranscriptionApp() {
         stats: tokenStatsRef.current,
       },
       transcript: data,
-      geminiKey: geminiKeyRef.current.trim() || undefined,
-      groqKey: groqKeyRef.current.trim() || undefined,
+      // Keys are removed from payload for security; backend will use .env
     };
 
     try {
       const res = await fetch("/api/sessions/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          geminiKey: geminiKeyRef.current.trim() || undefined,
+          groqKey: groqKeyRef.current.trim() || undefined,
+        }),
       });
       
       const result = await res.json();
@@ -321,12 +324,17 @@ export default function TranscriptionApp() {
       if (result.auditReport) {
         addLog("info", `Auto-audit complete. Status: ${result.auditReport.status}`);
         setAuditReport(result.auditReport);
-        setShowAudit(true);
+        
+        // Only show flyout on Localhost
+        if (window.location.hostname === "localhost") {
+          setShowAudit(true);
+        }
       } else {
         const errorDetail = result.auditError || "Unknown audit failure";
         addLog("error", `Quality audit failed: ${errorDetail}`);
       }
 
+      // Downloaded JSON will NOT contain API keys
       const blob = new Blob([JSON.stringify({ ...payload, auditReport: result.auditReport }, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

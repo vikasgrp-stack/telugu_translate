@@ -516,6 +516,13 @@ export default function TranscriptionApp() {
       isListeningRef.current = true;
       setIsListening(true);
       setError(null);
+      
+      // Auto-enable Speaker and warm up the engine
+      setTtsEnabled(true);
+      ttsEnabledRef.current = true;
+      const warmUp = new SpeechSynthesisUtterance("");
+      window.speechSynthesis.speak(warmUp);
+      
       startRecorderSegment(stream);
       scheduleBatch();
     } catch (err) {

@@ -6,6 +6,9 @@ import pkg from "../package.json";
 const LS_GROQ_KEY   = "tt_groq_key";
 const LS_GEMINI_KEY = "tt_gemini_key";
 const LS_CONTEXT    = "tt_global_context";
+const LS_VOICE      = "tt_selected_voice";
+const LS_TTS_ON     = "tt_tts_enabled";
+const LS_TTS_RATE   = "tt_tts_rate";
 
 const ENABLE_DONATIONS = process.env.NEXT_PUBLIC_ENABLE_DONATIONS === "true";
 const DONATION_URL     = process.env.NEXT_PUBLIC_DONATION_URL || "";
@@ -64,12 +67,23 @@ export default function TranscriptionApp() {
   const [audioSource, setAudioSource]     = useState<"mic" | "system">("system");
   const [globalContext, setGlobalContext] = useState("");
   const [onlineCount, setOnlineCount]     = useState(1);
+  const [duplicatesBlocked, setDuplicatesBlocked] = useState(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [auditReport, setAuditReport]     = useState<any>(null);
+  const [tokenStats, setTokenStats]       = useState<TokenStats | null>(null);
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
+  
   const [groqKey, setGroqKey]             = useState("");
   const [geminiKey, setGeminiKey]         = useState("");
   const [keysVisible, setKeysVisible]     = useState(false);
+  
+  // TTS State
+  const [ttsEnabled, setTtsEnabled]       = useState(false);
+  const [voices, setVoices]               = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState<string>("");
+  const [speakingId, setSpeakingId]       = useState<string | null>(null);
+  const [ttsRate, setTtsRate]             = useState(1.1);
+
   const groqKeyRef                        = useRef("");
   const geminiKeyRef                      = useRef("");
   const sessionIdRef                      = useRef<string>("");
@@ -86,9 +100,8 @@ export default function TranscriptionApp() {
   const countdownRef      = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingLogsRef    = useRef<LogEntry[]>([]);
   const logFlushTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sourcePanelRef    = useRef<HTMLDivElement>(null);
-  const translatedPanelRef = useRef<HTMLDivElement>(null);
-  const logPanelRef       = useRef<HTMLDivElement>(null);
+  
+  const bottomAnchorRef   = useRef<HTMLDivElement>(null);
 
   // ── Presence Heartbeat ────────────────────────────────────────────────────
   useEffect(() => {
@@ -105,13 +118,11 @@ export default function TranscriptionApp() {
         });
         const data = await res.json();
         if (data.onlineCount) setOnlineCount(data.onlineCount);
-      } catch {
-        // ignore presence errors
-      }
+      } catch { /* ignore */ }
     };
 
     sendHeartbeat();
-    const interval = setInterval(sendHeartbeat, 30000); // every 30s
+    const interval = setInterval(sendHeartbeat, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -122,14 +133,93 @@ export default function TranscriptionApp() {
   useEffect(() => { globalContextRef.current = globalContext; localStorage.setItem(LS_CONTEXT, globalContext); }, [globalContext]);
   useEffect(() => { chunksRef.current = chunks; }, [chunks]);
 
+  // Load Preferences
   useEffect(() => {
     setGroqKey(localStorage.getItem(LS_GROQ_KEY)   ?? "");
     setGeminiKey(localStorage.getItem(LS_GEMINI_KEY) ?? "");
     setGlobalContext(localStorage.getItem(LS_CONTEXT) ?? "");
+    setTtsEnabled(localStorage.getItem(LS_TTS_ON) === "true");
+    setSelectedVoice(localStorage.getItem(LS_VOICE) ?? "");
+    setTtsRate(Number(localStorage.getItem(LS_TTS_RATE) ?? "1.1"));
+
+    const loadVoices = () => {
+      const available = window.speechSynthesis.getVoices();
+      const filtered = available.filter(v => {
+        const isEnglish = v.lang.startsWith("en");
+        const isHindi = v.lang.startsWith("hi");
+        const isHighQuality = v.name.includes("Google") || v.name.includes("Natural") || v.name.includes("Online");
+        return (isEnglish || isHindi) && (isHighQuality || v.default);
+      });
+      filtered.sort((a, b) => {
+        if (a.name.includes("Google") && !b.name.includes("Google")) return -1;
+        if (!a.name.includes("Google") && b.name.includes("Google")) return 1;
+        return 0;
+      });
+      setVoices(filtered);
+      if (!localStorage.getItem(LS_VOICE) && filtered.length > 0) {
+        const best = filtered.find(v => v.name.includes("Google US English")) || filtered[0];
+        if (best) setSelectedVoice(best.name);
+      }
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
 
   useEffect(() => { groqKeyRef.current = groqKey;     localStorage.setItem(LS_GROQ_KEY,   groqKey);   }, [groqKey]);
   useEffect(() => { geminiKeyRef.current = geminiKey; localStorage.setItem(LS_GEMINI_KEY, geminiKey); }, [geminiKey]);
+  useEffect(() => { localStorage.setItem(LS_TTS_ON, String(ttsEnabled)); }, [ttsEnabled]);
+  useEffect(() => { localStorage.setItem(LS_VOICE, selectedVoice); }, [selectedVoice]);
+  useEffect(() => { localStorage.setItem(LS_TTS_RATE, String(ttsRate)); }, [ttsRate]);
+
+  const speakText = useCallback((text: string, id: string | null = null) => {
+    if (!ttsEnabled || !text) return;
+    
+    const cleanText = text.replace(/\[\.\.\.continues\]/g, "").trim();
+    if (!cleanText) return;
+
+    // Reset synthesis queue to ensure fresh start
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    const voice = voices.find(v => v.name === selectedVoice);
+    if (voice) {
+      utterance.voice = voice;
+    } else if (voices.length > 0) {
+      utterance.voice = voices[0]; // Fallback to first available
+    }
+    
+    utterance.rate = ttsRate;
+    utterance.volume = 1.0;
+    
+    utterance.onstart = () => id && setSpeakingId(id);
+    utterance.onend = () => setSpeakingId(null);
+    utterance.onerror = (e) => {
+      console.error("TTS Error:", e);
+      setSpeakingId(null);
+      // Attempt restart on error
+      window.speechSynthesis.resume();
+    };
+    
+    window.speechSynthesis.speak(utterance);
+  }, [ttsEnabled, voices, selectedVoice, ttsRate]);
+
+  const toggleTTS = () => {
+    const newState = !ttsEnabled;
+    setTtsEnabled(newState);
+    if (!newState) {
+      window.speechSynthesis.cancel();
+    } else {
+      // User gesture "Warm Up" to unlock audio engine in browsers
+      const warmUp = new SpeechSynthesisUtterance("");
+      window.speechSynthesis.speak(warmUp);
+      console.log("TTS Engine Warm-up triggered");
+    }
+  };
+
+  const testVoice = () => {
+    const text = "Spiritual translation engine engaged. Testing current voice.";
+    speakText(text, "test");
+  };
 
   const flushLogsToServer = useCallback((entries: LogEntry[]) => {
     if (!entries.length) return;
@@ -161,11 +251,7 @@ export default function TranscriptionApp() {
   const saveToFile = useCallback(async () => {
     const data = chunksRef.current.filter(c => c.sourceText || c.translatedText);
     addLog("info", `Attempting to save session with ${data.length} chunks...`);
-    
-    if (data.length === 0) {
-      addLog("warn", "No transcript data to save.");
-      return;
-    }
+    if (data.length === 0) return;
 
     setSaving(true);
     addLog("info", "Sending session to server for storage and auto-audit...");
@@ -195,22 +281,16 @@ export default function TranscriptionApp() {
       if (!res.ok) throw new Error(result.error || `Server returned ${res.status}`);
       
       addLog("info", `Session saved as ${result.filename}`);
-      console.log("Full save API response:", result);
-
-      if (result.auditLogs && Array.isArray(result.auditLogs)) {
-        result.auditLogs.forEach((msg: string) => addLog("api", msg));
-      }
 
       if (result.auditReport) {
         addLog("info", `Auto-audit complete. Status: ${result.auditReport.status}`);
         setAuditReport(result.auditReport);
         setShowAudit(true);
       } else {
-        const errorDetail = result.auditError || "Unknown audit failure (check server console)";
+        const errorDetail = result.auditError || "Unknown audit failure";
         addLog("error", `Quality audit failed: ${errorDetail}`);
       }
 
-      // Also trigger a browser download for the user's convenience
       const blob = new Blob([JSON.stringify({ ...payload, auditReport: result.auditReport }, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -240,11 +320,7 @@ export default function TranscriptionApp() {
     recorder?.stream?.getTracks().forEach(t => t.stop());
 
     addLog("info", "Listening stopped. Finalizing session...");
-
-    // Wait for last API calls to settle
-    setTimeout(() => {
-      saveToFile();
-    }, 2500);
+    setTimeout(() => saveToFile(), 2500);
   }, [saveToFile, addLog]);
 
   const processAudioBlob = useCallback(async (blob: Blob) => {
@@ -284,10 +360,15 @@ export default function TranscriptionApp() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
+      if (data.isDuplicate) {
+        setDuplicatesBlocked(prev => prev + 1);
+        addLog("api", "Duplicate ASR loop detected and blocked (tokens saved).");
+      }
+
       if (data.usage) {
         const u = data.usage;
         const prev = tokenStatsRef.current;
-        tokenStatsRef.current = {
+        const newStats = {
           sessionTotal:   (prev?.sessionTotal  ?? 0) + u.totalTokens,
           lastPrompt:     u.promptTokens,
           lastCompletion: u.completionTokens,
@@ -296,6 +377,8 @@ export default function TranscriptionApp() {
           audioSeconds:   (prev?.audioSeconds  ?? 0) + batchSecRef.current,
           sessionStartMs: prev?.sessionStartMs ?? Date.now(),
         };
+        tokenStatsRef.current = newStats;
+        setTokenStats(newStats);
       }
 
       setChunks(prev => prev.map(c =>
@@ -303,11 +386,15 @@ export default function TranscriptionApp() {
           ? { ...c, sourceText: data.sourceText, translatedText: data.translatedText, detectedLanguage: data.detectedLanguage, isTranslating: false }
           : c
       ));
+
+      if (data.translatedText && !data.isDuplicate) {
+        speakText(data.translatedText, chunkId);
+      }
     } catch (err) {
       addLog("error", `API Error: ${err instanceof Error ? err.message : String(err)}`);
       setChunks(prev => prev.filter(c => c.id !== chunkId));
     }
-  }, [addLog]);
+  }, [addLog, speakText]);
 
   const flushRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -353,31 +440,25 @@ export default function TranscriptionApp() {
   }, [processAudioBlob]);
 
   const startListening = useCallback(async () => {
-    // We allow starting even if keys are missing in UI, as they might be in .env
     setLogs([]);
     logIdCounter = 0;
     pendingLogsRef.current = [];
     tokenStatsRef.current = null;
+    setTokenStats(null);
     setAuditReport(null);
+    setDuplicatesBlocked(0);
 
     try {
       let stream: MediaStream;
       if (audioSource === "system") {
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true,
-        });
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
         const audioTracks = displayStream.getAudioTracks();
         if (audioTracks.length === 0) {
           displayStream.getTracks().forEach(t => t.stop());
-          throw new Error("No audio shared. Please ensure you check 'Share system audio' or 'Share tab audio' when selecting the screen.");
+          throw new Error("No audio shared.");
         }
         stream = new MediaStream(audioTracks);
-
-        // Auto-stop if user clicks "Stop sharing" in the browser UI
-        displayStream.getVideoTracks()[0]?.addEventListener("ended", () => {
-          stopListening();
-        });
+        displayStream.getVideoTracks()[0]?.addEventListener("ended", () => stopListening());
       } else {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { autoGainControl: true } });
       }
@@ -389,7 +470,7 @@ export default function TranscriptionApp() {
       scheduleBatch();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg.includes("NotAllowedError") ? "Audio access denied or cancelled." : msg);
+      setError(msg.includes("NotAllowedError") ? "Audio access denied." : msg);
     }
   }, [audioSource, startRecorderSegment, scheduleBatch, stopListening]);
 
@@ -405,34 +486,21 @@ export default function TranscriptionApp() {
     setAuditReport(null);
   }, []);
 
-  const scrollPanels = useCallback(() => {
-    // Force scroll to bottom for both panels
-    const scroll = (ref: React.RefObject<HTMLDivElement | null>) => {
-      if (ref.current) {
-        ref.current.scrollTop = ref.current.scrollHeight;
-      }
-    };
-    
-    // Call multiple times to handle slow rendering or layout shifts
-    scroll(sourcePanelRef);
-    scroll(translatedPanelRef);
-    setTimeout(() => { scroll(sourcePanelRef); scroll(translatedPanelRef); }, 50);
-    setTimeout(() => { scroll(sourcePanelRef); scroll(translatedPanelRef); }, 150);
-  }, []);
-
+  // Autoscroll 2.0
   useEffect(() => {
-    if (chunks.length > 0) {
-      scrollPanels();
+    if (bottomAnchorRef.current) {
+      bottomAnchorRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [chunks, scrollPanels]);
+  }, [chunks, logs]);
 
-  // UI Derived Labels
   const lastChunkWithLang = [...chunks].reverse().find(c => c.detectedLanguage);
   const detectedLabel = lastChunkWithLang?.detectedLanguage || "Voice";
   const targetLabel = targetLanguage === "english" ? (lastChunkWithLang?.detectedLanguage?.toLowerCase() === "english" ? "Hindi" : "English") : "Hindi";
   
+  const tokenPercentage = Math.min(100, ((tokenStats?.sessionTotal ?? 0) / 1000000) * 100);
+
   return (
-    <div className="min-h-screen flex bg-slate-50 text-slate-900 font-sans overflow-hidden relative">
+    <div className="h-screen flex bg-slate-50 text-slate-900 font-sans overflow-hidden relative">
       {/* Sidebar */}
       <aside 
         className={`transition-all duration-300 border-r border-slate-200 bg-white flex flex-col shrink-0 z-50
@@ -443,14 +511,8 @@ export default function TranscriptionApp() {
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Control Panel</h2>
             <div className="flex items-center gap-2">
-              <button 
-                onClick={() => setIsPinned(!isPinned)} 
-                className={`p-1.5 rounded-md transition-colors ${isPinned ? "text-sky-500 bg-sky-50" : "text-slate-400 hover:bg-slate-100"}`}
-                title={isPinned ? "Unpin Sidebar" : "Pin Sidebar"}
-              >
-                <svg className="w-4 h-4" fill={isPinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v2l2 2v4l-2 2v2a2 2 0 01-2 2H7a2 2 0 01-2-2v-2l-2-2v-4l2-2V5z" />
-                </svg>
+              <button onClick={() => setIsPinned(!isPinned)} className={`p-1.5 rounded-md transition-colors ${isPinned ? "text-sky-500 bg-sky-50" : "text-slate-400 hover:bg-slate-100"}`}>
+                <svg className="w-4 h-4" fill={isPinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v2l2 2v4l-2 2v2a2 2 0 01-2 2H7a2 2 0 01-2-2v-2l-2-2v-4l2-2V5z" /></svg>
               </button>
               <button onClick={() => setShowSidebar(false)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-md">✕</button>
             </div>
@@ -459,43 +521,63 @@ export default function TranscriptionApp() {
           <section className="space-y-6">
             <button 
               onClick={isListening ? stopListening : startListening} 
-              className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] ${isListening ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20" : "bg-sky-500 hover:bg-sky-600 text-white shadow-sky-500/20"}`}
+              className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] ${isListening ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200" : "bg-sky-500 hover:bg-sky-600 text-white shadow-sky-200"}`}
             >
               {isListening ? "Stop Listening" : "Start Listening"}
             </button>
 
             <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Speaker Output</label>
+                {ttsEnabled && (
+                  <button onClick={testVoice} className="text-[9px] font-bold text-sky-600 uppercase hover:underline">Test Voice</button>
+                )}
+              </div>
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={toggleTTS}
+                  className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition-all ${ttsEnabled ? "bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                  <span className="text-xs font-bold uppercase tracking-wider">{ttsEnabled ? "Speaker ON" : "Speaker OFF"}</span>
+                </button>
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center px-1">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase">Speed</span>
+                    <span className="text-[9px] font-bold text-sky-600">{ttsRate}x</span>
+                  </div>
+                  <input type="range" min={0.5} max={2} step={0.1} value={ttsRate} onChange={(e) => setTtsRate(Number(e.target.value))} className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
+                </div>
+                <select 
+                  value={selectedVoice} 
+                  onChange={(e) => setSelectedVoice(e.target.value)}
+                  className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+                >
+                  <option value="">Default Voice</option>
+                  {voices.map(v => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Audio Configuration</label>
               <div className="space-y-4">
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[10px] text-slate-500 font-medium">Source</span>
-                  <select value={audioSource} onChange={(e) => setAudioSource(e.target.value as "mic" | "system")} disabled={isListening} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 transition-all">
-                    <option value="mic">Microphone</option>
-                    <option value="system">System Audio</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[10px] text-slate-500 font-medium">Provider</span>
-                  <select value={provider} onChange={(e) => setProvider(e.target.value as "gemini" | "groq")} disabled={isListening} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 transition-all">
-                    <option value="groq">Groq (Whisper + LLaMA)</option>
-                    <option value="gemini">Gemini 2.0 Flash Lite</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-slate-500 font-medium">Batch Size</span>
-                    <span className="text-[10px] font-bold text-sky-600">{batchSec}s</span>
-                  </div>
-                  <input type="range" min={10} max={60} step={1} value={batchSec} onChange={(e) => setBatchSec(Number(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
-                </div>
+                <select value={audioSource} onChange={(e) => setAudioSource(e.target.value as "mic" | "system")} disabled={isListening} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs">
+                  <option value="mic">Microphone</option>
+                  <option value="system">System Audio</option>
+                </select>
+                <select value={provider} onChange={(e) => setProvider(e.target.value as "gemini" | "groq")} disabled={isListening} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs">
+                  <option value="groq">Groq (Whisper + LLaMA)</option>
+                  <option value="gemini">Gemini 2.5 Flash</option>
+                </select>
               </div>
             </div>
 
             <div className="space-y-3">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">API Keys</label>
               <div className="space-y-2">
-                <input type={keysVisible ? "text" : "password"} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="Groq Key" className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 transition-all" />
-                <input type={keysVisible ? "text" : "password"} value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="Gemini Key" className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 transition-all" />
+                <input type={keysVisible ? "text" : "password"} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="Groq Key" className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono" />
+                <input type={keysVisible ? "text" : "password"} value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="Gemini Key" className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono" />
                 <button onClick={() => setKeysVisible(v => !v)} className="text-[10px] text-slate-400 hover:text-slate-600 flex items-center gap-1 font-medium">
                   {keysVisible ? "Hide Keys" : "Show Keys"}
                 </button>
@@ -504,191 +586,160 @@ export default function TranscriptionApp() {
 
             <div className="space-y-3">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Speech Context</label>
-              <textarea
-                value={globalContext}
-                onChange={(e) => setGlobalContext(e.target.value)}
-                placeholder="Topic, speakers, keywords..."
-                className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 h-32 resize-none transition-all"
-              />
+              <textarea value={globalContext} onChange={(e) => setGlobalContext(e.target.value)} placeholder="Topic, speakers..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs h-32 resize-none" />
             </div>
           </section>
-
-          <footer className="mt-auto pt-6 border-t border-slate-100 space-y-4">
-            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-medium">
-              <span className={`w-1.5 h-1.5 rounded-full ${onlineCount > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
-              {onlineCount} user{onlineCount !== 1 ? "s" : ""} online
-            </div>
-            <div className="text-[10px] text-slate-300 font-mono">
-              v{pkg.version}
-            </div>
-          </footer>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-transparent">
-        <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-10">
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col min-w-0 bg-transparent relative">
+        <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white/80 backdrop-blur-md z-40 sticky top-0">
           <div className="flex items-center gap-4">
             {!showSidebar && (
               <button onClick={() => setShowSidebar(true)} className="p-2 -ml-2 text-slate-400 hover:text-slate-900 transition-colors bg-slate-50 rounded-lg">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
               </button>
             )}
-            <div className="flex flex-col">
-              <h1 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                Universal Transcriber
-                {isListening && (
-                  <div className="flex items-center gap-1 h-5 ml-1">
-                    <div className="w-0.5 h-full bg-sky-500 rounded-full animate-visualizer-1" />
-                    <div className="w-0.5 h-full bg-sky-500 rounded-full animate-visualizer-2" />
-                    <div className="w-0.5 h-full bg-sky-500 rounded-full animate-visualizer-3" />
-                  </div>
-                )}
-              </h1>
-              {isListening && nextFlushIn !== null && (
-                <span className="text-[10px] text-sky-600 font-bold flex items-center gap-2">
-                  Processing in {nextFlushIn}s
-                </span>
-              )}
-            </div>
+            <h1 className="text-sm font-bold text-slate-900 flex items-center gap-2">Universal Transcriber</h1>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="flex items-center bg-slate-100 rounded-lg p-1 mr-2 border border-slate-200/50">
-              <button onClick={() => setTargetLanguage("english")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "english" ? "bg-white text-sky-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>ENGLISH</button>
-              <button onClick={() => setTargetLanguage("hindi")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "hindi" ? "bg-white text-sky-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>HINDI</button>
+              <button onClick={() => setTargetLanguage("english")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "english" ? "bg-white text-sky-600 shadow-sm" : "text-slate-400"}`}>ENGLISH</button>
+              <button onClick={() => setTargetLanguage("hindi")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "hindi" ? "bg-white text-sky-600 shadow-sm" : "text-slate-400"}`}>HINDI</button>
             </div>
-
             {auditReport && (
-              <button onClick={() => setShowAudit(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-100 hover:bg-sky-100 transition-all group">
+              <button onClick={() => setShowAudit(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-100 hover:bg-sky-100 transition-all">
                 <span className={`w-2 h-2 rounded-full ${auditReport.status === "PASS" ? "bg-emerald-500" : "bg-rose-500"}`} />
                 <span className="text-[10px] font-bold text-sky-700 uppercase tracking-wider">Quality: {auditReport.status}</span>
               </button>
             )}
-
             <div className="h-4 w-[1px] bg-slate-200 mx-1" />
-
-            <button onClick={clearTranscript} className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 transition-colors">
-              Clear
-            </button>
-            <button onClick={clearAll} className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-rose-500 transition-colors">
-              Reset
-            </button>
-
-            {ENABLE_DONATIONS && DONATION_URL && (
-              <a href={DONATION_URL} target="_blank" rel="noopener noreferrer" className="ml-2 bg-sky-50 text-sky-600 hover:bg-sky-600 hover:text-white border border-sky-200 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all">
-                SUPPORT
-              </a>
-            )}
+            <button onClick={clearTranscript} className="text-[10px] font-bold uppercase text-slate-400 hover:text-slate-600">Clear</button>
+            <button onClick={clearAll} className="text-[10px] font-bold uppercase text-slate-400 hover:text-rose-500">Reset</button>
           </div>
         </header>
 
-
-        {error && (
-          <div className="mx-6 mt-4 p-3 bg-rose-500/10 border border-rose-500/50 rounded-lg text-rose-400 text-xs flex items-center gap-3 animate-in slide-in-from-top-2">
-            <span className="shrink-0 font-bold">Error:</span> {error}
-            <button onClick={() => setError(null)} className="ml-auto hover:text-white">✕</button>
-          </div>
-        )}
-
-        <div className="flex-1 flex flex-col min-h-0 p-6 gap-6 relative">
-          <div className="flex-1 flex min-h-0 gap-6">
+        {/* Scrollable Container */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar relative p-6 pb-32">
+          <div className="flex min-h-0 gap-6">
             {/* Source Panel */}
             <div className="flex-1 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
-                <span className="text-[10px] font-bold tracking-[0.2em] text-slate-400 uppercase">Input: {detectedLabel}</span>
-              </div>
-              <div ref={sourcePanelRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth natural-gradient">
-                {chunks.map(chunk => (
-                  <p key={chunk.id} className={`text-sm leading-[1.8] font-medium transition-colors duration-500 ${chunk.isTranslating ? "text-slate-400 italic" : "text-slate-700 hover:text-slate-900"}`}>
+              <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 text-[10px] font-bold tracking-[0.2em] text-slate-400 uppercase">Input: {detectedLabel}</div>
+              <div className="p-8 space-y-6 natural-gradient">
+                {chunks.map((chunk, i) => (
+                  <p key={chunk.id} className={`text-sm leading-[1.8] font-medium transition-all duration-500 ${chunk.isTranslating ? "text-slate-400 italic" : "text-slate-700"} ${i === chunks.length-1 ? "ring-2 ring-sky-100 bg-sky-50/30 rounded-lg p-2 -mx-2 shadow-sm" : ""}`}>
                     {chunk.sourceText || (chunk.isTranslating ? "Listening..." : "")}
                   </p>
                 ))}
-                {chunks.length === 0 && !isListening && (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-2 opacity-50">
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                    <p className="text-[10px] font-bold uppercase tracking-widest">Ready to Transcribe</p>
-                  </div>
-                )}
               </div>
             </div>
 
             {/* Translation Panel */}
             <div className="flex-1 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
-                <span className="text-[10px] font-bold tracking-[0.2em] text-sky-600 uppercase">Translation: {targetLabel}</span>
-              </div>
-              <div ref={translatedPanelRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth bg-gradient-to-br from-white to-sky-50/30">
-                {chunks.map(chunk => (
-                  <p key={chunk.id} className={`text-base leading-[1.8] font-semibold transition-all duration-700 ${chunk.isTranslating ? "text-slate-300 italic translate-x-1" : "text-sky-900/90 hover:text-sky-900"}`}>
-                    {chunk.translatedText || (chunk.isTranslating ? "Translating..." : "")}
-                  </p>
+              <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 text-[10px] font-bold tracking-[0.2em] text-sky-600 uppercase">Translation: {targetLabel}</div>
+              <div className="p-8 space-y-6 bg-gradient-to-br from-white to-sky-50/30">
+                {chunks.map((chunk, i) => (
+                  <div key={chunk.id} className={`transition-all duration-700 ${i === chunks.length-1 ? "ring-2 ring-sky-200 bg-white rounded-lg p-2 -mx-2 shadow-md animate-pulse-subtle" : ""}`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <p className={`flex-1 text-base leading-[1.8] font-semibold ${chunk.isTranslating ? "text-slate-300 italic translate-x-1" : "text-sky-900/90"}`}>
+                        {chunk.translatedText || (chunk.isTranslating ? "Translating..." : "")}
+                      </p>
+                      {speakingId === chunk.id && (
+                        <div className="mt-2 shrink-0 flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-full border border-emerald-100">
+                          <span className="flex gap-0.5 items-end h-3">
+                            <span className="w-0.5 bg-emerald-500 rounded-full animate-bounce h-full" />
+                            <span className="w-0.5 bg-emerald-500 rounded-full animate-bounce h-2 delay-75" />
+                            <span className="w-0.5 bg-emerald-500 rounded-full animate-bounce h-3 delay-150" />
+                          </span>
+                          <span className="text-[8px] font-bold text-emerald-600 uppercase tracking-tighter">Speaking</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
           </div>
+          <div ref={bottomAnchorRef} className="h-4" />
+        </div>
 
-          {/* Audit Flyout */}
-          <div className={`absolute inset-y-0 right-0 w-96 bg-white shadow-2xl border-l border-slate-200 transform transition-transform duration-500 ease-in-out z-30 flex flex-col ${showAudit && auditReport ? "translate-x-0" : "translate-x-full"}`}>
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <div className="flex items-center gap-3">
-                <div className={`w-2 h-2 rounded-full animate-pulse ${auditReport?.status === "PASS" ? "bg-emerald-500" : "bg-rose-500"}`} />
-                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-900">Quality Audit</h3>
+        {/* Floating Action Bar */}
+        {isListening && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[500px] z-50 bg-white/90 backdrop-blur-xl border border-slate-200 shadow-2xl rounded-2xl p-4 flex flex-col gap-3 animate-in slide-in-from-bottom-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <button onClick={stopListening} className="bg-rose-500 hover:bg-rose-600 text-white px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-lg shadow-rose-200">
+                  Stop Listening
+                </button>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-sky-600 uppercase tracking-widest">Processing</span>
+                  <span className="text-xs font-mono font-black">{nextFlushIn}s Remaining</span>
+                </div>
               </div>
-              <button onClick={() => setShowAudit(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">✕</button>
+              <div className="flex items-center gap-6">
+                {duplicatesBlocked > 0 && (
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Saved</div>
+                    <div className="text-xs font-mono font-bold text-emerald-600">{duplicatesBlocked} Loops</div>
+                  </div>
+                )}
+                <div className="text-right">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Quota ({tokenPercentage.toFixed(1)}%)</div>
+                  <div className="text-xs font-mono font-bold text-slate-900">{(tokenStats?.sessionTotal ?? 0).toLocaleString()} / 1M</div>
+                </div>
+              </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-              <section className="space-y-4">
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Verdict</span>
-                  <span className={`text-lg font-black ${auditReport?.status === "PASS" ? "text-emerald-500" : "text-rose-500"}`}>{auditReport?.status}</span>
-                </div>
-                <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className={`h-full transition-all duration-1000 ${auditReport?.status === "PASS" ? "w-full bg-emerald-500" : "w-1/3 bg-rose-500"}`} />
-                </div>
-              </section>
-
-              <section className="space-y-4">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <svg className="w-3 h-3 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                  Actionable Insights
-                </label>
-                <div className="space-y-3">
-                  {auditReport?.suggestedRules?.map((rule: string, i: number) => (
-                    <div key={i} className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-700 leading-relaxed shadow-sm">
-                      {rule}
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="space-y-4">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0012 18.75c-1.03 0-1.9.4-2.593.912l-.547.547z" /></svg>
-                  Reasoning
-                </label>
-                <p className="text-xs text-slate-500 leading-[1.6] italic bg-slate-50/50 p-4 rounded-xl border border-dashed border-slate-200">
-                  {auditReport?.reasoning}
-                </p>
-              </section>
+            {/* Quota Progress Bar */}
+            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div 
+                className={`h-full transition-all duration-1000 rounded-full ${tokenPercentage > 80 ? "bg-rose-500" : tokenPercentage > 50 ? "bg-amber-500" : "bg-emerald-500"}`}
+                style={{ width: `${tokenPercentage}%` }}
+              />
             </div>
+          </div>
+        )}
 
-            <div className="p-6 bg-slate-50 border-t border-slate-100">
-              <button onClick={() => setShowAudit(false)} className="w-full py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 transition-all">
-                Acknowledge
-              </button>
+        {/* Audit Flyout */}
+        <div className={`absolute inset-y-0 right-0 w-96 bg-white shadow-2xl border-l border-slate-200 transform transition-transform duration-500 ease-in-out z-50 flex flex-col ${showAudit && auditReport ? "translate-x-0" : "translate-x-full"}`}>
+          <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full animate-pulse ${auditReport?.status === "PASS" ? "bg-emerald-500" : "bg-rose-500"}`} />
+              <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-900">Quality Audit</h3>
             </div>
+            <button onClick={() => setShowAudit(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">✕</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+            <section className="space-y-4">
+              <div className="flex justify-between items-end"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Verdict</span><span className={`text-lg font-black ${auditReport?.status === "PASS" ? "text-emerald-500" : "text-rose-500"}`}>{auditReport?.status}</span></div>
+              <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div className={`h-full transition-all duration-1000 ${auditReport?.status === "PASS" ? "w-full bg-emerald-500" : "w-1/3 bg-rose-500"}`} />
+              </div>
+            </section>
+            <section className="space-y-4">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">Actionable Insights</label>
+              <div className="space-y-3">
+                {auditReport?.suggestedRules?.map((rule: string, i: number) => (
+                  <div key={i} className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-700 shadow-sm">{rule}</div>
+                ))}
+              </div>
+            </section>
+          </div>
+          <div className="p-6 bg-slate-50 border-t border-slate-100">
+            <button onClick={() => setShowAudit(false)} className="w-full py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest">Acknowledge</button>
           </div>
         </div>
 
+        {/* System Logs */}
         {showLogs && (
-          <div className="h-48 border-t border-slate-200 bg-white flex flex-col animate-in slide-in-from-bottom-full duration-300 z-20">
+          <div className="h-48 border-t border-slate-200 bg-white flex flex-col z-40">
             <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100 shrink-0">
               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">System Logs</span>
               <div className="flex gap-4">
-                <button onClick={clearLogs} className="text-[9px] text-slate-400 hover:text-slate-600 font-bold uppercase">Clear</button>
-                <button onClick={() => setShowLogs(false)} className="text-[9px] text-slate-400 hover:text-slate-900 font-bold uppercase">✕</button>
+                <button onClick={clearLogs} className="text-[9px] text-slate-400 font-bold uppercase">Clear</button>
+                <button onClick={() => setShowLogs(false)} className="text-[9px] text-slate-400 font-bold uppercase">✕</button>
               </div>
             </div>
             <div ref={logPanelRef} className="flex-1 overflow-y-auto p-4 font-mono text-[9px] space-y-1 custom-scrollbar">
@@ -703,16 +754,15 @@ export default function TranscriptionApp() {
           </div>
         )}
 
-        {/* Global Footer Actions */}
+        {/* Logs Toggle */}
         {!showLogs && logs.length > 0 && (
-          <div className="absolute bottom-4 right-6 flex items-center gap-2 z-20">
-            <button onClick={() => setShowLogs(true)} className="bg-white/80 backdrop-blur border border-slate-200 text-slate-400 hover:text-slate-900 px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg transition-all hover:scale-105">
+          <div className="absolute bottom-4 right-6 flex items-center gap-2 z-40">
+            <button onClick={() => setShowLogs(true)} className="bg-white/80 backdrop-blur border border-slate-200 text-slate-400 px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg">
               LOGS ({logs.length})
             </button>
           </div>
         )}
       </main>
-
     </div>
   );
 }

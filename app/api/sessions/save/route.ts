@@ -39,14 +39,17 @@ ${sample.map((c: any, i: number) => `[${i}] SOURCE: ${c.source}\n    TRANSLATION
 
 TASK:
 1. Identify EXACT mistakes (e.g., misheard Sanskrit, mangled proper nouns).
-2. Generate surgical rules in format: "Always translate '[Phonetic Error]' as '[Correct Spiritual Term]' in this context."
+2. VALIDATION RULE: Before flagging "hallucination", you MUST verify if the content exists in the SOURCE Telugu text.
+   - If dialogue markers (నవ్వి = smiled, అన్నాడు = said) are in the source, the dialogue is NOT a hallucination.
+   - Only flag if the translation contains concepts with NO equivalent in the source.
+3. Generate surgical rules in format: "Always translate '[Phonetic Error]' as '[Correct Spiritual Term]' in this context."
 
 Respond with ONLY a JSON object:
 {
   "status": "FAIL" | "PASS",
-  "issuesFound": ["List exact mistakes"],
-  "suggestedRules": ["Rule: 'meat' -> 'mitra'", "Rule: 'cave' -> 'katha'"],
-  "reasoning": "phonetic similarity causing drift"
+  "issuesFound": ["List exact mistakes only after source verification"],
+  "suggestedRules": ["Rule: 'meat' -> 'mitra'"],
+  "reasoning": "brief explanation"
 }
 `;
 

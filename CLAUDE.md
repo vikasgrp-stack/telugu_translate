@@ -22,6 +22,10 @@ Professional web developer and expert Prompt Engineer specializing in voice-to-t
 - **Audio Batching**: 30-60 second intervals.
 - **Verification**: `npm run lint` before committing.
 - **Environment**: Keys managed via `.env.local` or UI sidebar.
+- **Deployment**:
+  * **Live URL**: https://telugutranslate.vercel.app/
+  * **Vercel Dashboard**: https://vercel.com/vikasgrp-stacks-projects/~/deployments
+  * **Note**: Always deploy via Vercel (CLI or Dashboard) after merging changes to the `main` branch.
 
 ## Spiritual Fidelity Prompt
 - **Shloka Mode**: Sanskrit chants must provide Transliteration (IAST) followed by English translation.

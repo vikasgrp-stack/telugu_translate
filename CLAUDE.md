@@ -1,44 +1,28 @@
 # Telugu Transcriber Project Guide
 
 ## Developer Profile & Project Mission
-I am a professional web developer and expert **Prompt Engineer** specializing in the pipeline of voice-to-text transcription and multi-language translation, with a core focus on **Telugu**. 
+Professional web developer and expert Prompt Engineer specializing in voice-to-text transcription and multi-language translation. Mission: Build a high-fidelity "Sonix for Indian Philosophy" specifically for ISKCON-based discourses.
 
-This project is dedicated to transcribing and translating Indian philosophy classes, specifically discourses from **ISKCON preachers**. The scope covers deep spiritual topics including the **Bhagavad Gita**, **Srimad Bhagavatam**, **Chaitanya Charitamrita**, **Krishna-Radha Leelas**, and the **Mahabharata**. 
+## Tech Stack
+- **Framework**: Next.js (App Router), TypeScript, Tailwind CSS
+- **Primary AI (ASR/NMT)**: Gemini 2.5 Flash (Multimodal Audio-to-Text)
+- **Secondary AI**: Groq (Whisper Large v3 + Llama 3.3 70B)
+- **Auditor**: Gemini 2.5 Pro (High-fidelity quality judging)
+- **Feedback Storage**: `data/learned_rules.json` (Autonomous learning loop)
 
-### Mission: "The Sonix for Indian Philosophy"
-Our benchmark for quality and user experience is **Sonix.ai**. We aim to provide a professional-grade, data-first platform where spiritual discourses are treated as structured conversation objects, not just raw text.
+## Core Architectural Rules
+1. **Model Hierarchy**: Always prefer Gemini 2.5 Flash for its multimodal "Indic-aware" audio understanding. Fallback to Groq/Llama if quotas are hit.
+2. **Strict Grounding**: Translation must be ≤ 1.5x the input word count. Temperature must be 0 to prevent creative hallucinations.
+3. **Narrative Anchors**: Always pass previous Telugu/English pairs as a "Read-Only History" to maintain continuity without repetition.
+4. **Learning Loop**: Every session closure triggers an audit. Suggested rules must be surgical ("Replace X with Y") and saved to the dynamic rules file.
+5. **Immutable Glossary**: Proper nouns like "Prabhupada", "Alwar", and "Vaikuntham" must never be translated or altered.
 
-## Product Roadmap (Prioritized)
+## Operational Workflow
+- **Development**: `npm run dev` (Port 3000)
+- **Audio Batching**: 30-60 second intervals.
+- **Verification**: `npm run lint` before committing.
+- **Environment**: Keys managed via `.env.local` or UI sidebar.
 
-### Priority 1: Professional Look & Feel (UI/UX Polish)
-- **Dashboard Layout**: Refine the "Control Center" into a clean, focused transcript editor. Move configuration (API keys, Batch settings) to a collapsible sidebar.
-- **Typography & Spacing**: Use high-readability fonts (Inter/Roboto) with optimized line-height for long-form reading.
-- **Visual Feedback**: Implement confidence highlighting (visual cues for words where the AI might have struggled).
-
-### Priority 2: Interactive Transcription (MVP)
-- **Audio-to-Text Sync**: Store audio blobs per chunk so clicking a paragraph plays the corresponding audio segment.
-- **Speaker Diarization**: Automatically identify and label speakers (e.g., "Prabhuji", "Questioner") using AI prompts or manual tagging.
-- **Interactive Editor**: Allow basic text corrections that stay synced with the session data.
-
-### Priority 3: Distribution & Exports
-- **Subtitle Export**: Generate industry-standard SRT/VTT files for YouTube and social media.
-- **Clean Document Export**: Export the full transcript + Gemini Audit Report as a professional PDF or DOCX file.
-- **Workflow Integration**: Enable sharing of "read-only" session links for community review.
-
-## Build and Development Commands
-- **Dev Server**: `npm run dev`
-- **Production Build**: `npm run build`
-- **Linting**: `npm run lint` (uses ESLint)
-- **Start Production**: `npm run start`
-
-## Coding Standards & Patterns
-- **Language**: TypeScript (strict type checking enabled).
-- **Framework**: Next.js 16 (App Router) with React 19.
-- **Components**: Functional components with React Hooks (useCallback, useEffect, useRef).
-- **Styling**: Tailwind CSS (v4).
-- **Translation Strategy**: 
-  - **Faithful Semantic Mapping**: 1:1 proportionality, no expansion, no preaching.
-  - **Domain Accuracy**: Prioritize Vedic/Vaishnava terminology (Janmashtami, Japa, Caitanya, etc.).
-  - **Contextual Awareness**: Respect the specific narrative logic of ISKCON-based philosophical discourses.
-- **Logging**: Server-side logging to `logs/session.log` and client-side debug log panel.
-- **Verification**: Always run `npm run lint` before committing.
+## Spiritual Fidelity Prompt
+- **Shloka Mode**: Sanskrit chants must provide Transliteration (IAST) followed by English translation.
+- **Phonetic Defense**: Explicitly correct common Whisper hallucinations (e.g., meat -> mitra, horse -> harsa).

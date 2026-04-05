@@ -55,15 +55,17 @@ export default function TranscriptionApp() {
   const [logs, setLogs]                   = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs]           = useState(false);
   const [showSidebar, setShowSidebar]     = useState(true);
+  const [isPinned, setIsPinned]           = useState(true);
+  const [showAudit, setShowAudit]         = useState(false);
   const [recording, setRecording]         = useState(false);
-  const [provider, setProvider]           = useState<"gemini" | "groq">("groq");
+  const [saving, setSaving]               = useState(false);
+  const [provider, setProvider]           = useState<"gemini" | "groq">("gemini");
   const [targetLanguage, setTargetLanguage] = useState<"english" | "hindi">("english");
-  const [audioSource, setAudioSource]     = useState<"mic" | "system">("mic");
+  const [audioSource, setAudioSource]     = useState<"mic" | "system">("system");
   const [globalContext, setGlobalContext] = useState("");
   const [onlineCount, setOnlineCount]     = useState(1);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [auditReport, setAuditReport]     = useState<any>(null);
-  const [saving, setSaving]               = useState(false);
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
   const [groqKey, setGroqKey]             = useState("");
   const [geminiKey, setGeminiKey]         = useState("");
@@ -158,10 +160,15 @@ export default function TranscriptionApp() {
 
   const saveToFile = useCallback(async () => {
     const data = chunksRef.current.filter(c => c.sourceText || c.translatedText);
-    if (data.length === 0) return;
+    addLog("info", `Attempting to save session with ${data.length} chunks...`);
+    
+    if (data.length === 0) {
+      addLog("warn", "No transcript data to save.");
+      return;
+    }
 
     setSaving(true);
-    addLog("info", "Saving session and performing auto-audit...");
+    addLog("info", "Sending session to server for storage and auto-audit...");
 
     const payload = {
       meta: {
@@ -174,6 +181,7 @@ export default function TranscriptionApp() {
       },
       transcript: data,
       geminiKey: geminiKeyRef.current.trim() || undefined,
+      groqKey: groqKeyRef.current.trim() || undefined,
     };
 
     try {
@@ -182,14 +190,24 @@ export default function TranscriptionApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Save failed");
       
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || `Server returned ${res.status}`);
+      
+      addLog("info", `Session saved as ${result.filename}`);
+      console.log("Full save API response:", result);
+
+      if (result.auditLogs && Array.isArray(result.auditLogs)) {
+        result.auditLogs.forEach((msg: string) => addLog("api", msg));
+      }
+
       if (result.auditReport) {
+        addLog("info", `Auto-audit complete. Status: ${result.auditReport.status}`);
         setAuditReport(result.auditReport);
-        addLog("info", `Session saved to server: ${result.filename}. Auto-audit complete.`);
+        setShowAudit(true);
       } else {
-        addLog("info", `Session saved to server: ${result.filename}`);
+        const errorDetail = result.auditError || "Unknown audit failure (check server console)";
+        addLog("error", `Quality audit failed: ${errorDetail}`);
       }
 
       // Also trigger a browser download for the user's convenience
@@ -204,7 +222,7 @@ export default function TranscriptionApp() {
       URL.revokeObjectURL(url);
 
     } catch (err) {
-      addLog("error", `Failed to save session: ${err}`);
+      addLog("error", `Failed to save session: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSaving(false);
     }
@@ -246,7 +264,7 @@ export default function TranscriptionApp() {
       const context = chunksRef.current
         .filter(c => !c.isTranslating && c.sourceText)
         .slice(-3)
-        .map(c => c.sourceText);
+        .map(c => ({ telugu: c.sourceText, english: c.translatedText }));
 
       const response = await fetch("/api/transcribe", {
         method: "POST",
@@ -335,13 +353,7 @@ export default function TranscriptionApp() {
   }, [processAudioBlob]);
 
   const startListening = useCallback(async () => {
-    const needsKey = providerRef.current === "groq" ? !groqKeyRef.current.trim() : !geminiKeyRef.current.trim();
-    if (needsKey) {
-      setShowSidebar(true);
-      setError(`Please enter your ${providerRef.current === "groq" ? "Groq" : "Gemini"} API key.`);
-      return;
-    }
-
+    // We allow starting even if keys are missing in UI, as they might be in .env
     setLogs([]);
     logIdCounter = 0;
     pendingLogsRef.current = [];
@@ -420,76 +432,93 @@ export default function TranscriptionApp() {
   const targetLabel = targetLanguage === "english" ? (lastChunkWithLang?.detectedLanguage?.toLowerCase() === "english" ? "Hindi" : "English") : "Hindi";
   
   return (
-    <div className="min-h-screen flex bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-800 via-slate-900 to-slate-950 text-slate-100 font-sans overflow-hidden">
+    <div className="min-h-screen flex bg-slate-50 text-slate-900 font-sans overflow-hidden relative">
       {/* Sidebar */}
-      <aside className={`transition-all duration-300 border-r border-slate-800/50 bg-slate-950/20 flex flex-col shrink-0 ${showSidebar ? "w-80" : "w-0 overflow-hidden border-none"}`}>
-
+      <aside 
+        className={`transition-all duration-300 border-r border-slate-200 bg-white flex flex-col shrink-0 z-50
+          ${isPinned ? "relative" : "absolute inset-y-0 left-0 shadow-2xl"}
+          ${showSidebar ? "w-80 translate-x-0" : "w-0 -translate-x-full overflow-hidden border-none"}`}
+      >
         <div className="p-6 flex flex-col gap-8 h-full overflow-y-auto custom-scrollbar">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Control Panel</h2>
-            <button onClick={() => setShowSidebar(false)} className="text-slate-500 hover:text-white lg:hidden">✕</button>
+            <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Control Panel</h2>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setIsPinned(!isPinned)} 
+                className={`p-1.5 rounded-md transition-colors ${isPinned ? "text-sky-500 bg-sky-50" : "text-slate-400 hover:bg-slate-100"}`}
+                title={isPinned ? "Unpin Sidebar" : "Pin Sidebar"}
+              >
+                <svg className="w-4 h-4" fill={isPinned ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v2l2 2v4l-2 2v2a2 2 0 01-2 2H7a2 2 0 01-2-2v-2l-2-2v-4l2-2V5z" />
+                </svg>
+              </button>
+              <button onClick={() => setShowSidebar(false)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-md">✕</button>
+            </div>
           </div>
 
           <section className="space-y-6">
             <button 
               onClick={isListening ? stopListening : startListening} 
-              className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] transition-all shadow-xl hover:scale-[1.02] active:scale-[0.98] ${isListening ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20" : "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"}`}
+              className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] ${isListening ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20" : "bg-sky-500 hover:bg-sky-600 text-white shadow-sky-500/20"}`}
             >
               {isListening ? "Stop Listening" : "Start Listening"}
             </button>
 
             <div className="space-y-3 pt-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Audio Configuration</label>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Audio Configuration</label>
               <div className="space-y-4">
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[10px] text-slate-400">Source</span>
-                  <select value={audioSource} onChange={(e) => setAudioSource(e.target.value as "mic" | "system")} disabled={isListening} className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-sky-500/50">
+                  <span className="text-[10px] text-slate-500 font-medium">Source</span>
+                  <select value={audioSource} onChange={(e) => setAudioSource(e.target.value as "mic" | "system")} disabled={isListening} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 transition-all">
                     <option value="mic">Microphone</option>
                     <option value="system">System Audio</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[10px] text-slate-400">Provider</span>
-                  <select value={provider} onChange={(e) => setProvider(e.target.value as "gemini" | "groq")} disabled={isListening} className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-sky-500/50">
+                  <span className="text-[10px] text-slate-500 font-medium">Provider</span>
+                  <select value={provider} onChange={(e) => setProvider(e.target.value as "gemini" | "groq")} disabled={isListening} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 transition-all">
                     <option value="groq">Groq (Whisper + LLaMA)</option>
                     <option value="gemini">Gemini 2.0 Flash Lite</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[10px] text-slate-400">Batch Size ({batchSec}s)</span>
-                  <input type="range" min={10} max={60} step={1} value={batchSec} onChange={(e) => setBatchSec(Number(e.target.value))} className="w-full accent-emerald-500" />
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-slate-500 font-medium">Batch Size</span>
+                    <span className="text-[10px] font-bold text-sky-600">{batchSec}s</span>
+                  </div>
+                  <input type="range" min={10} max={60} step={1} value={batchSec} onChange={(e) => setBatchSec(Number(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
                 </div>
               </div>
             </div>
 
             <div className="space-y-3">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">API Keys</label>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">API Keys</label>
               <div className="space-y-2">
-                <input type={keysVisible ? "text" : "password"} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="Groq Key" className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-500/50" />
-                <input type={keysVisible ? "text" : "password"} value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="Gemini Key" className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-500/50" />
-                <button onClick={() => setKeysVisible(v => !v)} className="text-[10px] text-slate-500 hover:text-slate-300 flex items-center gap-1">
+                <input type={keysVisible ? "text" : "password"} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="Groq Key" className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 transition-all" />
+                <input type={keysVisible ? "text" : "password"} value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="Gemini Key" className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 transition-all" />
+                <button onClick={() => setKeysVisible(v => !v)} className="text-[10px] text-slate-400 hover:text-slate-600 flex items-center gap-1 font-medium">
                   {keysVisible ? "Hide Keys" : "Show Keys"}
                 </button>
               </div>
             </div>
 
             <div className="space-y-3">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Speech Context</label>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Speech Context</label>
               <textarea
                 value={globalContext}
                 onChange={(e) => setGlobalContext(e.target.value)}
                 placeholder="Topic, speakers, keywords..."
-                className="w-full bg-slate-800/50 text-slate-200 border border-slate-700 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-sky-500/50 h-32 resize-none"
+                className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500/50 h-32 resize-none transition-all"
               />
             </div>
           </section>
 
-          <footer className="mt-auto pt-6 border-t border-slate-800 space-y-4">
-            <div className="flex items-center gap-2 text-[10px] text-slate-500">
-              <span className={`w-1.5 h-1.5 rounded-full ${onlineCount > 0 ? "bg-emerald-500" : "bg-slate-700"}`} />
+          <footer className="mt-auto pt-6 border-t border-slate-100 space-y-4">
+            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-medium">
+              <span className={`w-1.5 h-1.5 rounded-full ${onlineCount > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
               {onlineCount} user{onlineCount !== 1 ? "s" : ""} online
             </div>
-            <div className="text-[10px] text-slate-600 font-mono">
+            <div className="text-[10px] text-slate-300 font-mono">
               v{pkg.version}
             </div>
           </footer>
@@ -498,26 +527,26 @@ export default function TranscriptionApp() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 bg-transparent">
-        <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800/50 bg-slate-900/40 backdrop-blur-md sticky top-0 z-10">
+        <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-4">
             {!showSidebar && (
-              <button onClick={() => setShowSidebar(true)} className="p-2 -ml-2 text-slate-400 hover:text-white transition-colors">
+              <button onClick={() => setShowSidebar(true)} className="p-2 -ml-2 text-slate-400 hover:text-slate-900 transition-colors bg-slate-50 rounded-lg">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
               </button>
             )}
             <div className="flex flex-col">
-              <h1 className="text-sm font-bold text-white flex items-center gap-2">
+              <h1 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 Universal Transcriber
                 {isListening && (
-                  <div className="flex items-center gap-1 h-3 ml-1">
-                    <div className="w-0.5 h-full bg-emerald-500 rounded-full animate-visualizer-1" />
-                    <div className="w-0.5 h-full bg-emerald-500 rounded-full animate-visualizer-2" />
-                    <div className="w-0.5 h-full bg-emerald-500 rounded-full animate-visualizer-3" />
+                  <div className="flex items-center gap-1 h-5 ml-1">
+                    <div className="w-0.5 h-full bg-sky-500 rounded-full animate-visualizer-1" />
+                    <div className="w-0.5 h-full bg-sky-500 rounded-full animate-visualizer-2" />
+                    <div className="w-0.5 h-full bg-sky-500 rounded-full animate-visualizer-3" />
                   </div>
                 )}
               </h1>
               {isListening && nextFlushIn !== null && (
-                <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-2">
+                <span className="text-[10px] text-sky-600 font-bold flex items-center gap-2">
                   Processing in {nextFlushIn}s
                 </span>
               )}
@@ -525,22 +554,29 @@ export default function TranscriptionApp() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center bg-slate-800/50 rounded-lg p-1 mr-2 border border-slate-700/50">
-              <button onClick={() => setTargetLanguage("english")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "english" ? "bg-slate-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"}`}>ENGLISH</button>
-              <button onClick={() => setTargetLanguage("hindi")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "hindi" ? "bg-slate-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"}`}>HINDI</button>
+            <div className="flex items-center bg-slate-100 rounded-lg p-1 mr-2 border border-slate-200/50">
+              <button onClick={() => setTargetLanguage("english")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "english" ? "bg-white text-sky-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>ENGLISH</button>
+              <button onClick={() => setTargetLanguage("hindi")} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${targetLanguage === "hindi" ? "bg-white text-sky-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>HINDI</button>
             </div>
 
-            <div className="h-4 w-[1px] bg-slate-800 mx-1" />
+            {auditReport && (
+              <button onClick={() => setShowAudit(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-100 hover:bg-sky-100 transition-all group">
+                <span className={`w-2 h-2 rounded-full ${auditReport.status === "PASS" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                <span className="text-[10px] font-bold text-sky-700 uppercase tracking-wider">Quality: {auditReport.status}</span>
+              </button>
+            )}
 
-            <button onClick={clearTranscript} className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors">
+            <div className="h-4 w-[1px] bg-slate-200 mx-1" />
+
+            <button onClick={clearTranscript} className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 transition-colors">
               Clear
             </button>
-            <button onClick={clearAll} className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-rose-400 transition-colors">
+            <button onClick={clearAll} className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-rose-500 transition-colors">
               Reset
             </button>
 
             {ENABLE_DONATIONS && DONATION_URL && (
-              <a href={DONATION_URL} target="_blank" rel="noopener noreferrer" className="ml-2 bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white border border-amber-500/50 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all">
+              <a href={DONATION_URL} target="_blank" rel="noopener noreferrer" className="ml-2 bg-sky-50 text-sky-600 hover:bg-sky-600 hover:text-white border border-sky-200 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all">
                 SUPPORT
               </a>
             )}
@@ -555,52 +591,21 @@ export default function TranscriptionApp() {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col min-h-0">
-          {auditReport && (
-            <div className="mx-6 mt-6 p-6 bg-sky-500/5 border border-sky-500/20 rounded-2xl flex flex-col gap-4 animate-in zoom-in-95 duration-300">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-sky-400 text-xs font-bold uppercase tracking-[0.15em]">Quality Audit Report</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className={`w-2 h-2 rounded-full ${auditReport.status === "PASS" ? "bg-emerald-500" : "bg-rose-500"}`} />
-                    <span className={`text-[10px] font-bold ${auditReport.status === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>{auditReport.status}</span>
-                  </div>
-                </div>
-                <button onClick={() => setAuditReport(null)} className="text-slate-600 hover:text-white transition-colors">✕</button>
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="space-y-3">
-                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Actionable Insights</span>
-                  <ul className="space-y-2">
-                    {auditReport.suggestedRules?.map((rule: string, i: number) => (
-                      <li key={i} className="text-xs text-slate-300 flex gap-2 leading-relaxed">
-                        <span className="text-sky-500 shrink-0">•</span> {rule}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="space-y-3">
-                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Reasoning</span>
-                  <p className="text-xs text-slate-400 leading-relaxed italic">{auditReport.reasoning}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="flex-1 flex min-h-0 divide-x divide-slate-800">
+        <div className="flex-1 flex flex-col min-h-0 p-6 gap-6 relative">
+          <div className="flex-1 flex min-h-0 gap-6">
             {/* Source Panel */}
-            <div className="flex-1 flex flex-col min-w-0">
-              <div className="px-6 py-3 bg-slate-900/50 border-b border-slate-800 flex justify-between items-center shrink-0">
-                <span className="text-[10px] font-bold tracking-[0.2em] text-slate-500 uppercase">Input: {detectedLabel}</span>
+            <div className="flex-1 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
+                <span className="text-[10px] font-bold tracking-[0.2em] text-slate-400 uppercase">Input: {detectedLabel}</span>
               </div>
-              <div ref={sourcePanelRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth">
+              <div ref={sourcePanelRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth natural-gradient">
                 {chunks.map(chunk => (
-                  <p key={chunk.id} className={`text-sm leading-[1.8] font-medium transition-colors duration-500 ${chunk.isTranslating ? "text-slate-600 italic" : "text-slate-200 hover:text-white"}`}>
+                  <p key={chunk.id} className={`text-sm leading-[1.8] font-medium transition-colors duration-500 ${chunk.isTranslating ? "text-slate-400 italic" : "text-slate-700 hover:text-slate-900"}`}>
                     {chunk.sourceText || (chunk.isTranslating ? "Listening..." : "")}
                   </p>
                 ))}
                 {chunks.length === 0 && !isListening && (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-2 opacity-50">
+                  <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-2 opacity-50">
                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
                     <p className="text-[10px] font-bold uppercase tracking-widest">Ready to Transcribe</p>
                   </div>
@@ -609,36 +614,89 @@ export default function TranscriptionApp() {
             </div>
 
             {/* Translation Panel */}
-            <div className="flex-1 flex flex-col min-w-0 bg-slate-950/20">
-              <div className="px-6 py-3 bg-slate-900/50 border-b border-slate-800 flex justify-between items-center shrink-0">
-                <span className="text-[10px] font-bold tracking-[0.2em] text-sky-500 uppercase">Translation: {targetLabel}</span>
+            <div className="flex-1 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
+                <span className="text-[10px] font-bold tracking-[0.2em] text-sky-600 uppercase">Translation: {targetLabel}</span>
               </div>
-              <div ref={translatedPanelRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth">
+              <div ref={translatedPanelRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth bg-gradient-to-br from-white to-sky-50/30">
                 {chunks.map(chunk => (
-                  <p key={chunk.id} className={`text-base leading-[1.8] font-medium transition-all duration-700 ${chunk.isTranslating ? "text-slate-700 italic translate-x-1" : "text-emerald-50/90 hover:text-white"}`}>
+                  <p key={chunk.id} className={`text-base leading-[1.8] font-semibold transition-all duration-700 ${chunk.isTranslating ? "text-slate-300 italic translate-x-1" : "text-sky-900/90 hover:text-sky-900"}`}>
                     {chunk.translatedText || (chunk.isTranslating ? "Translating..." : "")}
                   </p>
                 ))}
               </div>
             </div>
           </div>
+
+          {/* Audit Flyout */}
+          <div className={`absolute inset-y-0 right-0 w-96 bg-white shadow-2xl border-l border-slate-200 transform transition-transform duration-500 ease-in-out z-30 flex flex-col ${showAudit && auditReport ? "translate-x-0" : "translate-x-full"}`}>
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div className="flex items-center gap-3">
+                <div className={`w-2 h-2 rounded-full animate-pulse ${auditReport?.status === "PASS" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-900">Quality Audit</h3>
+              </div>
+              <button onClick={() => setShowAudit(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">✕</button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+              <section className="space-y-4">
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Verdict</span>
+                  <span className={`text-lg font-black ${auditReport?.status === "PASS" ? "text-emerald-500" : "text-rose-500"}`}>{auditReport?.status}</span>
+                </div>
+                <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div className={`h-full transition-all duration-1000 ${auditReport?.status === "PASS" ? "w-full bg-emerald-500" : "w-1/3 bg-rose-500"}`} />
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <svg className="w-3 h-3 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                  Actionable Insights
+                </label>
+                <div className="space-y-3">
+                  {auditReport?.suggestedRules?.map((rule: string, i: number) => (
+                    <div key={i} className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-700 leading-relaxed shadow-sm">
+                      {rule}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0012 18.75c-1.03 0-1.9.4-2.593.912l-.547.547z" /></svg>
+                  Reasoning
+                </label>
+                <p className="text-xs text-slate-500 leading-[1.6] italic bg-slate-50/50 p-4 rounded-xl border border-dashed border-slate-200">
+                  {auditReport?.reasoning}
+                </p>
+              </section>
+            </div>
+
+            <div className="p-6 bg-slate-50 border-t border-slate-100">
+              <button onClick={() => setShowAudit(false)} className="w-full py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 transition-all">
+                Acknowledge
+              </button>
+            </div>
+          </div>
         </div>
 
         {showLogs && (
-          <div className="h-48 border-t border-slate-800 bg-slate-950 flex flex-col animate-in slide-in-from-bottom-full duration-300">
-            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-900 shrink-0">
-              <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">System Logs</span>
+          <div className="h-48 border-t border-slate-200 bg-white flex flex-col animate-in slide-in-from-bottom-full duration-300 z-20">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100 shrink-0">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">System Logs</span>
               <div className="flex gap-4">
-                <button onClick={clearLogs} className="text-[9px] text-slate-600 hover:text-slate-400 font-bold uppercase">Clear</button>
-                <button onClick={() => setShowLogs(false)} className="text-[9px] text-slate-600 hover:text-white font-bold uppercase">✕</button>
+                <button onClick={clearLogs} className="text-[9px] text-slate-400 hover:text-slate-600 font-bold uppercase">Clear</button>
+                <button onClick={() => setShowLogs(false)} className="text-[9px] text-slate-400 hover:text-slate-900 font-bold uppercase">✕</button>
               </div>
             </div>
             <div ref={logPanelRef} className="flex-1 overflow-y-auto p-4 font-mono text-[9px] space-y-1 custom-scrollbar">
               {logs.map(entry => (
-                <div key={entry.id} className="flex gap-4 border-b border-slate-900/50 pb-1">
-                  <span className="text-slate-700 shrink-0">{entry.time}</span>
+                <div key={entry.id} className="flex gap-4 border-b border-slate-50 pb-1">
+                  <span className="text-slate-300 shrink-0">{entry.time}</span>
                   <span className={`shrink-0 w-12 font-bold ${LOG_COLORS[entry.level]}`}>[{entry.level.toUpperCase()}]</span>
-                  <span className="text-slate-500 whitespace-pre-wrap">{entry.msg}</span>
+                  <span className="text-slate-400 whitespace-pre-wrap">{entry.msg}</span>
                 </div>
               ))}
             </div>
@@ -647,37 +705,14 @@ export default function TranscriptionApp() {
 
         {/* Global Footer Actions */}
         {!showLogs && logs.length > 0 && (
-          <div className="absolute bottom-4 right-6 flex items-center gap-2">
-            <button onClick={() => setShowLogs(true)} className="bg-slate-800/80 backdrop-blur border border-slate-700 text-slate-400 hover:text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-xl transition-all hover:scale-105">
+          <div className="absolute bottom-4 right-6 flex items-center gap-2 z-20">
+            <button onClick={() => setShowLogs(true)} className="bg-white/80 backdrop-blur border border-slate-200 text-slate-400 hover:text-slate-900 px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg transition-all hover:scale-105">
               LOGS ({logs.length})
             </button>
           </div>
         )}
       </main>
 
-      <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.1);
-        }
-
-        @keyframes visualizer {
-          0%, 100% { height: 4px; opacity: 0.5; }
-          50% { height: 12px; opacity: 1; }
-        }
-        .animate-visualizer-1 { animation: visualizer 0.6s ease-in-out infinite; }
-        .animate-visualizer-2 { animation: visualizer 0.6s ease-in-out infinite 0.2s; }
-        .animate-visualizer-3 { animation: visualizer 0.6s ease-in-out infinite 0.4s; }
-      `}</style>
     </div>
   );
 }

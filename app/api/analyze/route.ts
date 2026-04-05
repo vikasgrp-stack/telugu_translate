@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest } from "next/server";
 
 export async function POST(req: NextRequest) {
-  const { entries, globalContext, currentPrompt, geminiKey } = await req.json();
+  const { entries, globalContext, geminiKey } = await req.json();
 
   if (!entries || entries.length === 0) {
     return new Response(JSON.stringify({ error: "No feedback entries provided" }), { status: 400 });
@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const feedbackList = entries.map((e: any, i: number) => `
 ENTRY #${i+1}:
 SOURCE: ${e.sourceText}

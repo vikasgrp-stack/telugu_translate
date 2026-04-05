@@ -178,8 +178,11 @@ export default function TranscriptionApp() {
       setVoices(filtered);
       voicesRef.current = filtered;
       if (!localStorage.getItem(LS_VOICE) && filtered.length > 0) {
-        const best = filtered.find(v => v.name.includes("Google US English")) || filtered[0];
-        if (best) setSelectedVoice(best.name);
+        const best = filtered.find(v => v.name.includes("Google \u0939\u0931\u0928\u094d\u0926\u0940") || v.name.includes("Google Hindi")) || filtered[0];
+        if (best) {
+          setSelectedVoice(best.name);
+          selectedVoiceRef.current = best.name;
+        }
       }
     };
     loadVoices();

@@ -1,13 +1,14 @@
-# Telugu Transcriber Project Guide
+# BhaktiTranslate Project Guide
 
 ## Developer Profile & Project Mission
-Professional web developer and expert Prompt Engineer specializing in voice-to-text transcription and multi-language translation. Mission: Build a high-fidelity "Sonix for Indian Philosophy" specifically for ISKCON-based discourses.
+Professional web developer and expert Prompt Engineer specializing in voice-to-text transcription and multi-language translation. Mission: Build a high-fidelity "Sonix for Indian Philosophy" (BhaktiTranslate) specifically for ISKCON-based discourses.
 
 ## Tech Stack
 - **Framework**: Next.js (App Router), TypeScript, Tailwind CSS
 - **Primary AI (ASR/NMT)**: Gemini 2.5 Flash (Multimodal Audio-to-Text)
 - **Secondary AI**: Groq (Whisper Large v3 + Llama 3.3 70B)
 - **Auditor**: Gemini 2.5 Pro (High-fidelity quality judging)
+- **Auth**: NextAuth.js (Google Provider)
 - **Feedback Storage**: `data/learned_rules.json` (Autonomous learning loop)
 
 ## Core Architectural Rules
@@ -22,14 +23,15 @@ Professional web developer and expert Prompt Engineer specializing in voice-to-t
 - **Development**: `npm run dev` (Port 3000)
 - **Audio Batching**: 30-60 second intervals.
 - **Verification**: `npm run lint` before committing.
-- **Environment**: Keys managed via `.env.local` or UI sidebar.
+- **Environment**: Keys managed via `.env.local` or Vercel Dashboard.
 - **Deployment Process**:
   1. **Stage Changes**: `git add .`
   2. **Force Add API**: `git add -f app/api/sessions/save/route.ts` (Required as it is inside an ignored folder).
   3. **Commit**: `git commit -m "Description"`
   4. **Push**: `git push origin main`
-  5. **Vercel**: Deployment triggers automatically on push. Monitor at: https://vercel.com/vikasgrp-stacks-projects/telugutranslate/deployments
-  6. **Keys**: Ensure `GEMINI_API_KEY` and `GROQ_API_KEY` are set in Vercel Settings -> Environment Variables.
+  5. **Vercel**: Deployment triggers automatically on push. Monitor at: https://vercel.com/vikasgrp-stacks-projects/bhakti_translate/deployments
+  6. **Live URL**: https://bhaktitranslate.vercel.app/
+  7. **Keys**: Ensure `GEMINI_API_KEY`, `GROQ_API_KEY`, `NEXTAUTH_SECRET`, and `NEXTAUTH_URL` are set in Vercel Settings -> Environment Variables.
 
 ## Spiritual Fidelity Prompt
 - **Shloka Mode**: Sanskrit chants must provide Transliteration (IAST) followed by English translation.

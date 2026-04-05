@@ -15,7 +15,8 @@ Professional web developer and expert Prompt Engineer specializing in voice-to-t
 2. **Strict Grounding**: Translation must be ≤ 1.5x the input word count. Temperature must be 0 to prevent creative hallucinations.
 3. **Narrative Anchors**: Always pass previous Telugu/English pairs as a "Read-Only History" to maintain continuity without repetition.
 4. **Learning Loop**: Every session closure triggers an audit. Suggested rules must be surgical ("Replace X with Y") and saved to the dynamic rules file.
-5. **Immutable Glossary**: Proper nouns like "Prabhupada", "Alwar", and "Vaikuntham" must never be translated or altered.
+5. **Agentic Testing Loop**: After any significant code change, the Orchestrator MUST spawn a `generalist` sub-agent to perform an adversarial review or functional test. The feature is only complete when the sub-agent provides a "Clean Validation Report".
+6. **Immutable Glossary**: Proper nouns like "Prabhupada", "Alwar", and "Vaikuntham" must never be translated or altered.
 
 ## Operational Workflow
 - **Development**: `npm run dev` (Port 3000)

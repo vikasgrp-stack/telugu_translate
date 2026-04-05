@@ -86,8 +86,13 @@ export default function TranscriptionApp() {
   const [speakingId, setSpeakingId]       = useState<string | null>(null);
   const [ttsRate, setTtsRate]             = useState(1.1);
 
+  // Persistence Refs (Agent Fix #1)
   const ttsRateRef                        = useRef(1.1);
   const selectedVoiceRef                  = useRef("");
+  const voicesRef                         = useRef<SpeechSynthesisVoice[]>([]);
+  const ttsEnabledRef                     = useRef(false);
+  const isMounted                         = useRef(true);
+
   const groqKeyRef                        = useRef("");
   const geminiKeyRef                      = useRef("");
   const sessionIdRef                      = useRef<string>("");
@@ -105,12 +110,13 @@ export default function TranscriptionApp() {
   const pendingLogsRef    = useRef<LogEntry[]>([]);
   const logFlushTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   
-  const sourcePanelRef    = useRef<HTMLDivElement>(null);
-  const translatedPanelRef = useRef<HTMLDivElement>(null);
-  const logPanelRef       = useRef<HTMLDivElement>(null);
   const bottomAnchorRef   = useRef<HTMLDivElement>(null);
 
-  // ── Presence Heartbeat ────────────────────────────────────────────────────
+  // ── Initialization & Cleanup ───────────────────────────────────────────────
+  useEffect(() => {
+    return () => { isMounted.current = false; };
+  }, []);
+
   useEffect(() => {
     if (!sessionIdRef.current) {
       sessionIdRef.current = Math.random().toString(36).substring(2, 15);
@@ -167,6 +173,7 @@ export default function TranscriptionApp() {
         return 0;
       });
       setVoices(filtered);
+      voicesRef.current = filtered;
       if (!localStorage.getItem(LS_VOICE) && filtered.length > 0) {
         const best = filtered.find(v => v.name.includes("Google US English")) || filtered[0];
         if (best) setSelectedVoice(best.name);
@@ -178,9 +185,11 @@ export default function TranscriptionApp() {
 
   useEffect(() => { groqKeyRef.current = groqKey;     localStorage.setItem(LS_GROQ_KEY,   groqKey);   }, [groqKey]);
   useEffect(() => { geminiKeyRef.current = geminiKey; localStorage.setItem(LS_GEMINI_KEY, geminiKey); }, [geminiKey]);
-  useEffect(() => { localStorage.setItem(LS_TTS_ON, String(ttsEnabled)); }, [ttsEnabled]);
+  useEffect(() => { 
+    ttsEnabledRef.current = ttsEnabled;
+    localStorage.setItem(LS_TTS_ON, String(ttsEnabled)); 
+  }, [ttsEnabled]);
   
-  // Sync Refs with UI State immediately
   useEffect(() => { 
     selectedVoiceRef.current = selectedVoice;
     localStorage.setItem(LS_VOICE, selectedVoice); 
@@ -191,7 +200,38 @@ export default function TranscriptionApp() {
     localStorage.setItem(LS_TTS_RATE, String(ttsRate)); 
   }, [ttsRate]);
 
-  // Hot-swap speech settings (Restart current chunk if rate or voice changes)
+  // ── Speech Engine (Agent Fix #1 & #2) ──────────────────────────────────────
+  const speakText = useCallback((text: string, id: string | null = null) => {
+    if (!ttsEnabledRef.current || !text) return;
+    
+    const cleanText = text.replace(/\[\.\.\.continues\]/g, "").trim();
+    if (!cleanText) return;
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    
+    // Always use live Ref values to bypass stale closures
+    const currentVoices = voicesRef.current.length > 0 ? voicesRef.current : window.speechSynthesis.getVoices();
+    const voice = currentVoices.find(v => v.name === selectedVoiceRef.current);
+    
+    if (voice) utterance.voice = voice;
+    else if (currentVoices.length > 0) utterance.voice = currentVoices[0];
+    
+    utterance.rate = ttsRateRef.current;
+    utterance.volume = 1.0;
+    
+    utterance.onstart = () => isMounted.current && id && setSpeakingId(id);
+    utterance.onend = () => isMounted.current && setSpeakingId(null);
+    utterance.onerror = (e) => {
+      console.error("TTS Error:", e);
+      if (isMounted.current) setSpeakingId(null);
+      window.speechSynthesis.resume();
+    };
+    
+    window.speechSynthesis.speak(utterance);
+  }, []); // Ref-only dependencies ensure no closure stale
+
+  // Hot-swap speech settings
   useEffect(() => {
     if (ttsEnabled && speakingId && speakingId !== "test") {
       const currentChunk = chunksRef.current.find(c => c.id === speakingId);
@@ -199,40 +239,7 @@ export default function TranscriptionApp() {
         speakText(currentChunk.translatedText, currentChunk.id);
       }
     }
-  }, [ttsRate, selectedVoice, ttsEnabled]);
-
-  const speakText = useCallback((text: string, id: string | null = null) => {
-    if (!ttsEnabled || !text) return;
-    
-    const cleanText = text.replace(/\[\.\.\.continues\]/g, "").trim();
-    if (!cleanText) return;
-
-    window.speechSynthesis.cancel();
-    
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    
-    // CRITICAL: Always use the Ref values, not the state values
-    // This bypasses the stale closure from MediaRecorder
-    const voice = voices.find(v => v.name === selectedVoiceRef.current);
-    if (voice) {
-      utterance.voice = voice;
-    } else if (voices.length > 0) {
-      utterance.voice = voices[0];
-    }
-    
-    utterance.rate = ttsRateRef.current;
-    utterance.volume = 1.0;
-    
-    utterance.onstart = () => id && setSpeakingId(id);
-    utterance.onend = () => setSpeakingId(null);
-    utterance.onerror = (e) => {
-      console.error("TTS Error:", e);
-      setSpeakingId(null);
-      window.speechSynthesis.resume();
-    };
-    
-    window.speechSynthesis.speak(utterance);
-  }, [ttsEnabled, voices]); // Note: removed selectedVoice/ttsRate from deps to rely on refs
+  }, [ttsRate, selectedVoice, ttsEnabled, speakText]);
 
   const toggleTTS = () => {
     const newState = !ttsEnabled;
@@ -240,10 +247,8 @@ export default function TranscriptionApp() {
     if (!newState) {
       window.speechSynthesis.cancel();
     } else {
-      // User gesture "Warm Up" to unlock audio engine in browsers
       const warmUp = new SpeechSynthesisUtterance("");
       window.speechSynthesis.speak(warmUp);
-      console.log("TTS Engine Warm-up triggered");
     }
   };
 

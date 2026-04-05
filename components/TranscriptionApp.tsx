@@ -51,6 +51,7 @@ const LOG_COLORS: Record<LogEntry["level"], string> = {
 let logIdCounter = 0;
 
 export default function TranscriptionApp() {
+  const { data: session } = useSession();
   const [isListening, setIsListening]     = useState(false);
   const [chunks, setChunks]               = useState<TranscriptChunk[]>([]);
   const [error, setError]                 = useState<string | null>(null);
@@ -549,9 +550,41 @@ export default function TranscriptionApp() {
           </div>
 
           <section className="space-y-6">
+            {!session ? (
+              <div className="p-6 bg-sky-50 border border-sky-100 rounded-2xl flex flex-col items-center gap-4 text-center">
+                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm">
+                  <svg className="w-6 h-6 text-sky-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-2.21 5.39-7.84 5.39-4.84 0-8.75-4.01-8.75-8.96s3.91-8.96 8.75-8.96c2.75 0 4.59 1.16 5.64 2.17l2.59-2.5c-1.66-1.54-3.83-2.48-8.23-2.48-5.96 0-10.8 4.84-10.8 10.8s4.84 10.8 10.8 10.8c6.22 0 10.38-4.38 10.38-10.56 0-.71-.08-1.25-.18-1.79h-10.2z"/></svg>
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Members Only</h3>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">Sign in with Google to start your transcription session.</p>
+                </div>
+                <button 
+                  onClick={() => signIn("google")}
+                  className="w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm"
+                >
+                  Sign in with Google
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                {session.user?.image && (
+                  <img src={session.user.image} alt="User" className="w-8 h-8 rounded-full border border-white shadow-sm" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-slate-900 truncate">{session.user?.name}</p>
+                  <p className="text-[9px] text-slate-400 truncate">{session.user?.email}</p>
+                </div>
+                <button onClick={() => signOut()} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                </button>
+              </div>
+            )}
+
             <button 
               onClick={isListening ? stopListening : startListening} 
-              className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] ${isListening ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200" : "bg-sky-500 hover:bg-sky-600 text-white shadow-sky-200"}`}
+              disabled={!session && !isListening}
+              className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-[0.2em] transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] ${!session && !isListening ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none" : isListening ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200" : "bg-sky-500 hover:bg-sky-600 text-white shadow-sky-200"}`}
             >
               {isListening ? "Stop Listening" : "Start Listening"}
             </button>

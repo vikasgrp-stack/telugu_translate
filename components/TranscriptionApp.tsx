@@ -145,8 +145,12 @@ export default function TranscriptionApp() {
     setSelectedVoice(localStorage.getItem(LS_VOICE) ?? "");
     setTtsRate(Number(localStorage.getItem(LS_TTS_RATE) ?? "1.1"));
 
-    const loadVoices = () => {
+    const loadVoices = (retries = 0) => {
       const available = window.speechSynthesis.getVoices();
+      if (available.length === 0 && retries < 10) {
+        setTimeout(() => loadVoices(retries + 1), 200);
+        return;
+      }
       const filtered = available.filter(v => {
         const isEnglish = v.lang.startsWith("en");
         const isHindi = v.lang.startsWith("hi");
@@ -173,6 +177,17 @@ export default function TranscriptionApp() {
   useEffect(() => { localStorage.setItem(LS_TTS_ON, String(ttsEnabled)); }, [ttsEnabled]);
   useEffect(() => { localStorage.setItem(LS_VOICE, selectedVoice); }, [selectedVoice]);
   useEffect(() => { localStorage.setItem(LS_TTS_RATE, String(ttsRate)); }, [ttsRate]);
+
+  // Hot-swap speech settings (Restart current chunk if rate or voice changes)
+  useEffect(() => {
+    if (ttsEnabled && speakingId && speakingId !== "test") {
+      const currentChunk = chunksRef.current.find(c => c.id === speakingId);
+      if (currentChunk && currentChunk.translatedText) {
+        // Calling speakText will auto-cancel the previous one and start with new ttsRate/voice
+        speakText(currentChunk.translatedText, currentChunk.id);
+      }
+    }
+  }, [ttsRate, selectedVoice, ttsEnabled]);
 
   const speakText = useCallback((text: string, id: string | null = null) => {
     if (!ttsEnabled || !text) return;

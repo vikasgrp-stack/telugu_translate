@@ -724,6 +724,13 @@ export default function TranscriptionApp() {
             <div className="space-y-3 pt-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Audio Configuration</label>
               <div className="space-y-4">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[9px] text-slate-500 font-bold uppercase tracking-tight">Capture Mode</span>
+                  <div className="flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200/50">
+                    <button onClick={() => setTranscribeMode("batched")} className={`flex-1 py-1 rounded-md text-[9px] font-bold transition-all ${transcribeMode === "batched" ? "bg-white text-sky-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>BATCHED</button>
+                    <button onClick={() => setTranscribeMode("realtime")} className={`flex-1 py-1 rounded-md text-[9px] font-bold transition-all ${transcribeMode === "realtime" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>REAL-TIME</button>
+                  </div>
+                </div>
                 <select value={audioSource} onChange={(e) => setAudioSource(e.target.value as "mic" | "system")} disabled={isListening} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs">
                   <option value="mic">Microphone</option>
                   <option value="system">System Audio</option>

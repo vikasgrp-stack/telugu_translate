@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 
 export const metadata: Metadata = {
-  title: "Telugu Transcriber",
-  description: "Real-time Telugu speech to English translation",
+  title: "BhaktiTranslate",
+  description: "High-fidelity AI transcription and translation for spiritual discourse",
 };
 
 export default function RootLayout({

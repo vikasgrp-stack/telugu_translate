@@ -22,10 +22,13 @@ Professional web developer and expert Prompt Engineer specializing in voice-to-t
 - **Audio Batching**: 30-60 second intervals.
 - **Verification**: `npm run lint` before committing.
 - **Environment**: Keys managed via `.env.local` or UI sidebar.
-- **Deployment**:
-  * **Live URL**: https://telugutranslate.vercel.app/
-  * **Vercel Dashboard**: https://vercel.com/vikasgrp-stacks-projects/~/deployments
-  * **Note**: Always deploy via Vercel (CLI or Dashboard) after merging changes to the `main` branch.
+- **Deployment Process**:
+  1. **Stage Changes**: `git add .`
+  2. **Force Add API**: `git add -f app/api/sessions/save/route.ts` (Required as it is inside an ignored folder).
+  3. **Commit**: `git commit -m "Description"`
+  4. **Push**: `git push origin main`
+  5. **Vercel**: Deployment triggers automatically on push. Monitor at: https://vercel.com/vikasgrp-stacks-projects/telugutranslate/deployments
+  6. **Keys**: Ensure `GEMINI_API_KEY` and `GROQ_API_KEY` are set in Vercel Settings -> Environment Variables.
 
 ## Spiritual Fidelity Prompt
 - **Shloka Mode**: Sanskrit chants must provide Transliteration (IAST) followed by English translation.

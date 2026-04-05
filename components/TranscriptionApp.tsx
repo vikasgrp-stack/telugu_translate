@@ -65,6 +65,7 @@ export default function TranscriptionApp() {
   const [recording, setRecording]         = useState(false);
   const [saving, setSaving]               = useState(false);
   const [provider, setProvider]           = useState<"gemini" | "groq">("gemini");
+  const [transcribeMode, setTranscribeMode] = useState<"batched" | "realtime">("batched");
   const [targetLanguage, setTargetLanguage] = useState<"english" | "hindi">("english");
   const [audioSource, setAudioSource]     = useState<"mic" | "system">("system");
   const [globalContext, setGlobalContext] = useState("");

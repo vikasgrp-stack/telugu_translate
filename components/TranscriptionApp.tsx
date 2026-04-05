@@ -84,6 +84,8 @@ export default function TranscriptionApp() {
   const [speakingId, setSpeakingId]       = useState<string | null>(null);
   const [ttsRate, setTtsRate]             = useState(1.1);
 
+  const ttsRateRef                        = useRef(1.1);
+  const selectedVoiceRef                  = useRef("");
   const groqKeyRef                        = useRef("");
   const geminiKeyRef                      = useRef("");
   const sessionIdRef                      = useRef<string>("");

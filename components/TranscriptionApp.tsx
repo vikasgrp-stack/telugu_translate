@@ -180,7 +180,7 @@ export default function TranscriptionApp() {
       }
     };
     loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
+    window.speechSynthesis.onvoiceschanged = () => loadVoices();
   }, []);
 
   useEffect(() => { groqKeyRef.current = groqKey;     localStorage.setItem(LS_GROQ_KEY,   groqKey);   }, [groqKey]);

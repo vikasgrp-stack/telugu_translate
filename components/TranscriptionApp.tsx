@@ -148,10 +148,11 @@ export default function TranscriptionApp() {
     if (!session) return;
     try {
       const res = await fetch("/api/user/credits");
+      if (!res.ok) return;
       const data = await res.json();
-      if (data.credits !== undefined) setCredits(data.credits);
+      if (data && data.credits !== undefined) setCredits(data.credits);
     } catch (err) {
-      console.error("Failed to fetch credits:", err);
+      // Ignore if not logged in yet
     }
   }, [session]);
 

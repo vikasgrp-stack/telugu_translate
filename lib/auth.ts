@@ -12,21 +12,26 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async signIn({ user }) {
       if (!user?.email || !user?.id) return true;
+      if (!supabase) return true; // Safety check for missing credentials
 
-      // Check if profile exists
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .single();
+      try {
+        // Check if profile exists
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .single();
 
-      if (!profile) {
-        // Initialize new user with 15 credits
-        await supabase.from('profiles').insert({
-          id: user.id,
-          email: user.email,
-          credits: 15.0,
-        });
+        if (!profile) {
+          // Initialize new user with 15 credits
+          await supabase.from('profiles').insert({
+            id: user.id,
+            email: user.email,
+            credits: 15.0,
+          });
+        }
+      } catch (err) {
+        console.error("Auth Supabase sync failed:", err);
       }
 
       return true;

@@ -177,15 +177,23 @@ export default function TranscriptionApp() {
   useEffect(() => { groqKeyRef.current = groqKey;     localStorage.setItem(LS_GROQ_KEY,   groqKey);   }, [groqKey]);
   useEffect(() => { geminiKeyRef.current = geminiKey; localStorage.setItem(LS_GEMINI_KEY, geminiKey); }, [geminiKey]);
   useEffect(() => { localStorage.setItem(LS_TTS_ON, String(ttsEnabled)); }, [ttsEnabled]);
-  useEffect(() => { localStorage.setItem(LS_VOICE, selectedVoice); }, [selectedVoice]);
-  useEffect(() => { localStorage.setItem(LS_TTS_RATE, String(ttsRate)); }, [ttsRate]);
+  
+  // Sync Refs with UI State immediately
+  useEffect(() => { 
+    selectedVoiceRef.current = selectedVoice;
+    localStorage.setItem(LS_VOICE, selectedVoice); 
+  }, [selectedVoice]);
+  
+  useEffect(() => { 
+    ttsRateRef.current = ttsRate;
+    localStorage.setItem(LS_TTS_RATE, String(ttsRate)); 
+  }, [ttsRate]);
 
   // Hot-swap speech settings (Restart current chunk if rate or voice changes)
   useEffect(() => {
     if (ttsEnabled && speakingId && speakingId !== "test") {
       const currentChunk = chunksRef.current.find(c => c.id === speakingId);
       if (currentChunk && currentChunk.translatedText) {
-        // Calling speakText will auto-cancel the previous one and start with new ttsRate/voice
         speakText(currentChunk.translatedText, currentChunk.id);
       }
     }
@@ -197,18 +205,20 @@ export default function TranscriptionApp() {
     const cleanText = text.replace(/\[\.\.\.continues\]/g, "").trim();
     if (!cleanText) return;
 
-    // Reset synthesis queue to ensure fresh start
     window.speechSynthesis.cancel();
     
     const utterance = new SpeechSynthesisUtterance(cleanText);
-    const voice = voices.find(v => v.name === selectedVoice);
+    
+    // CRITICAL: Always use the Ref values, not the state values
+    // This bypasses the stale closure from MediaRecorder
+    const voice = voices.find(v => v.name === selectedVoiceRef.current);
     if (voice) {
       utterance.voice = voice;
     } else if (voices.length > 0) {
-      utterance.voice = voices[0]; // Fallback to first available
+      utterance.voice = voices[0];
     }
     
-    utterance.rate = ttsRate;
+    utterance.rate = ttsRateRef.current;
     utterance.volume = 1.0;
     
     utterance.onstart = () => id && setSpeakingId(id);
@@ -216,12 +226,11 @@ export default function TranscriptionApp() {
     utterance.onerror = (e) => {
       console.error("TTS Error:", e);
       setSpeakingId(null);
-      // Attempt restart on error
       window.speechSynthesis.resume();
     };
     
     window.speechSynthesis.speak(utterance);
-  }, [ttsEnabled, voices, selectedVoice, ttsRate]);
+  }, [ttsEnabled, voices]); // Note: removed selectedVoice/ttsRate from deps to rely on refs
 
   const toggleTTS = () => {
     const newState = !ttsEnabled;

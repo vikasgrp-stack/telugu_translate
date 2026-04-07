@@ -74,6 +74,8 @@ export default function TranscriptionApp() {
   const [auditReport, setAuditReport]     = useState<any>(null);
   const [tokenStats, setTokenStats]       = useState<TokenStats | null>(null);
   const tokenStatsRef                     = useRef<TokenStats | null>(null);
+  const [credits, setCredits]             = useState<number | null>(null);
+  const [totalSpent, setTotalSpent]       = useState<number>(0);
   
   const [groqKey, setGroqKey]             = useState("");
   const [geminiKey, setGeminiKey]         = useState("");
@@ -141,6 +143,28 @@ export default function TranscriptionApp() {
     const interval = setInterval(sendHeartbeat, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const fetchCredits = useCallback(async () => {
+    if (!session) return;
+    try {
+      const res = await fetch("/api/user/credits");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && data.credits !== undefined) setCredits(data.credits);
+      
+      // Calculate spending: $0.10 per 1M input, $0.40 per 1M output
+      if (data.total_input_tokens !== undefined && data.total_output_tokens !== undefined) {
+        const spent = (data.total_input_tokens / 1000000 * 0.10) + (data.total_output_tokens / 1000000 * 0.40);
+        setTotalSpent(spent);
+      }
+    } catch (err) {
+      // Ignore if not logged in yet
+    }
+  }, [session]);
+
+  useEffect(() => {
+    fetchCredits();
+  }, [fetchCredits]);
 
   // Sync refs
   useEffect(() => { batchSecRef.current = batchSec; }, [batchSec]);
@@ -439,12 +463,13 @@ export default function TranscriptionApp() {
 
       if (data.translatedText && !data.isDuplicate) {
         speakText(data.translatedText, chunkId);
+        fetchCredits(); // Update spending/credits after each call
       }
     } catch (err) {
       addLog("error", `API Error: ${err instanceof Error ? err.message : String(err)}`);
       setChunks(prev => prev.filter(c => c.id !== chunkId));
     }
-  }, [addLog, speakText]);
+  }, [addLog, speakText, fetchCredits]);
 
   const flushRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;

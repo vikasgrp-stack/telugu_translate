@@ -657,7 +657,7 @@ export default function TranscriptionApp() {
                 </select>
                 <select value={provider} onChange={(e) => setProvider(e.target.value as "gemini" | "groq")} disabled={isListening} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-xs">
                   <option value="groq">Groq (Whisper + LLaMA)</option>
-                  <option value="gemini">Gemini 2.5 Flash</option>
+                  <option value="gemini">Gemini 2.5 Flash-Lite</option>
                 </select>
               </div>
             </div>

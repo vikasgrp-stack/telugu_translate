@@ -3,6 +3,9 @@ import Groq from "groq-sdk";
 import { NextRequest } from "next/server";
 import fs from "fs";
 import path from "path";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 
 export type TokenUsage = {
   promptTokens: number;
@@ -19,8 +22,59 @@ type TranscribeResult = {
   isDuplicate?: boolean;
 };
 
+export const dynamic = 'force-dynamic';
+
 const GEMINI_CONTEXT_WINDOW = 1_048_576;
 const GROQ_CONTEXT_WINDOW = 128_000;
+
+async function trackUsage(userId: string, tokens: TokenUsage) {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return;
+  
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('total_tokens, total_input_tokens, total_output_tokens')
+      .eq('id', userId)
+      .single();
+
+    if (profile) {
+      await supabase
+        .from('profiles')
+        .update({ 
+          total_tokens: (profile.total_tokens || 0) + tokens.totalTokens,
+          total_input_tokens: (profile.total_input_tokens || 0) + tokens.promptTokens,
+          total_output_tokens: (profile.total_output_tokens || 0) + tokens.completionTokens,
+          last_active: new Date().toISOString()
+        })
+        .eq('id', userId);
+    }
+  } catch (err) {
+    console.error("Failed to track usage:", err);
+  }
+}
+
+async function deductCredits(userId: string, amount: number = 0.5) {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return;
+  }
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('credits')
+      .eq('id', userId)
+      .single();
+
+    if (profile) {
+      const newCredits = Math.max(0, (profile.credits || 0) - amount);
+      await supabase
+        .from('profiles')
+        .update({ credits: newCredits })
+        .eq('id', userId);
+    }
+  } catch (err) {
+    console.error("Failed to deduct credits:", err);
+  }
+}
 
 const SPIRITUAL_GLOSSARY = `
 ## SPIRITUAL GLOSSARY (Immutable Tokens)
@@ -48,7 +102,11 @@ function getDynamicRules(): string {
   try {
     const rulesPath = path.join(process.cwd(), "data", "learned_rules.json");
     if (fs.existsSync(rulesPath)) {
-      const rules = JSON.parse(fs.readFileSync(rulesPath, "utf-8"));
+      let content = fs.readFileSync(rulesPath, "utf-8");
+      if (content.charCodeAt(0) === 0xFEFF) {
+        content = content.slice(1);
+      }
+      const rules = JSON.parse(content);
       if (Array.isArray(rules) && rules.length > 0) {
         return "\n## ADDITIONAL LEARNED RULES:\n" + rules.map((r: string) => `- ${r}`).join("\n");
       }
@@ -80,9 +138,9 @@ function formatContinuationNote(context?: any[]): string {
 // ── DEDUPLICATION GATE ──
 function isDuplicateInput(current: string, context?: any[]): boolean {
   if (!current || !context || context.length === 0) return false;
+  if (current.length > 1000) return false; // Audio blob check
   const currentNorm = current.trim().substring(0, 60).toLowerCase();
   
-  // Check against last 3 chunks
   return context.slice(-3).some(c => {
     if (!c.telugu) return false;
     const prevNorm = c.telugu.trim().substring(0, 60).toLowerCase();
@@ -127,7 +185,7 @@ async function transcribeWithGemini(
 ): Promise<TranscribeResult> {
   const key = apiKey?.trim() || process.env.GEMINI_API_KEY!;
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
   const historyBlock = formatContext(context);
   const continuationNote = formatContinuationNote(context);
@@ -200,7 +258,6 @@ async function transcribeWithGroq(
 
   const rawSourceText = transcription.text.trim();
   
-  // ── DEDUPLICATION GATE ──
   if (isDuplicateInput(rawSourceText, context)) {
     return { 
       sourceText: rawSourceText, 
@@ -254,18 +311,33 @@ Output ONLY translation.`,
     };
     return { sourceText: scrubbedSourceText, translatedText, detectedLanguage: transcription.language, usage };
   } catch (err: any) {
-    // Fallback logic kept same
     const fallbackChat = await groq.chat.completions.create({ ...translationPrompt, model: "llama-3.1-8b-instant" } as any);
-    return { sourceText: scrubbedSourceText, translatedText: fallbackChat.choices[0]?.message?.content?.trim() || "", detectedLanguage: transcription.language, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, contextWindow: GROQ_CONTEXT_WINDOW } };
+    const usage = {
+      promptTokens: fallbackChat.usage?.prompt_tokens ?? 0,
+      completionTokens: fallbackChat.usage?.completion_tokens ?? 0,
+      totalTokens: fallbackChat.usage?.total_tokens ?? 0,
+      contextWindow: GROQ_CONTEXT_WINDOW,
+    };
+    return { sourceText: scrubbedSourceText, translatedText: fallbackChat.choices[0]?.message?.content?.trim() || "", detectedLanguage: transcription.language, usage };
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
     const { audio, mimeType, provider, groqKey, geminiKey, context, targetLanguage, globalContext } = await req.json();
+    
     const result = provider === "groq"
       ? await transcribeWithGroq(audio, mimeType, groqKey, context, targetLanguage, globalContext)
       : await transcribeWithGemini(audio, mimeType, geminiKey, context, targetLanguage, globalContext);
+
+    if (session?.user?.id) {
+      deductCredits(session.user.id).catch(e => console.error("Credit deduction failed:", e));
+      if (result.usage) {
+        trackUsage(session.user.id, result.usage).catch(e => console.error("Usage tracking failed:", e));
+      }
+    }
+
     return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500 });

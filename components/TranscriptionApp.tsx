@@ -77,7 +77,7 @@ export default function TranscriptionApp() {
   
   const [groqKey, setGroqKey]             = useState("");
   const [geminiKey, setGeminiKey]         = useState("");
-  const [keysVisible, setKeysVisible]     = useState(false);
+  const [keysVisible, setKeysVisible]     = useState(true);
   
   // TTS State
   const [ttsEnabled, setTtsEnabled]       = useState(false);

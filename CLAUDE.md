@@ -33,6 +33,6 @@ Professional web developer and expert Prompt Engineer specializing in voice-to-t
   6. **Live URL**: https://bhaktitranslate.vercel.app/
   7. **Keys**: Ensure `GEMINI_API_KEY`, `GROQ_API_KEY`, `NEXTAUTH_SECRET`, and `NEXTAUTH_URL` are set in Vercel Settings -> Environment Variables.
 
-## Spiritual Fidelity Prompt
+## Spiritual Fidelity Prompt (Stable Deployment)
 - **Shloka Mode**: Sanskrit chants must provide Transliteration (IAST) followed by English translation.
 - **Phonetic Defense**: Explicitly correct common Whisper hallucinations (e.g., meat -> mitra, horse -> harsa).

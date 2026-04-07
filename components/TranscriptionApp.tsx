@@ -607,6 +607,17 @@ export default function TranscriptionApp() {
               </div>
             )}
 
+            <div className="flex gap-3">
+              <div className="flex-1 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Credits</p>
+                <p className="text-sm font-black text-slate-900">{credits !== null ? credits.toFixed(1) : "--"}</p>
+              </div>
+              <div className="flex-1 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Spent ($)</p>
+                <p className="text-sm font-black text-emerald-600">${totalSpent.toFixed(4)}</p>
+              </div>
+            </div>
+
             <button 
               onClick={isListening ? stopListening : startListening} 
               disabled={!session && !isListening}

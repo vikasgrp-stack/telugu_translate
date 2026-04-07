@@ -12,7 +12,8 @@ Professional web developer and expert Prompt Engineer specializing in voice-to-t
 - **Feedback Storage**: `data/learned_rules.json` (Autonomous learning loop)
 
 ## Core Architectural Rules
-1. **Model Hierarchy**: Always prefer Gemini 2.5 Flash for its multimodal "Indic-aware" audio understanding. Fallback to Groq/Llama if quotas are hit.
+1. **Approval Mandate**: **NEVER merge a feature branch into the `main` branch without explicitly asking the USER in BOLD LETTERS for confirmation.**
+2. **Model Hierarchy**: Always prefer Gemini 2.5 Flash for its multimodal "Indic-aware" audio understanding. Fallback to Groq/Llama if quotas are hit.
 2. **Strict Grounding**: Translation must be ≤ 1.5x the input word count. Temperature must be 0 to prevent creative hallucinations.
 3. **Narrative Anchors**: Always pass previous Telugu/English pairs as a "Read-Only History" to maintain continuity without repetition.
 4. **Learning Loop**: Every session closure triggers an audit. Suggested rules must be surgical ("Replace X with Y") and saved to the dynamic rules file.

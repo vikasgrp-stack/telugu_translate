@@ -144,7 +144,9 @@ export async function POST(req: NextRequest) {
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2));
 
     const auditLogs: string[] = [];
-    const auditReport = await runAudit(payload, auditLogs);
+    // ── AUDIT DISABLED TO SAVE COST ──
+    // const auditReport = await runAudit(payload, auditLogs);
+    const auditReport = null; 
 
     if (auditReport) {
       fs.writeFileSync(filePath, JSON.stringify({ ...payload, auditReport }, null, 2));
